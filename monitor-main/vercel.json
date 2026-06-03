@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "buildCommand": "cd node-website-monitor/frontend && npm install && npm run build",
+  "outputDirectory": "node-website-monitor/frontend/build",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

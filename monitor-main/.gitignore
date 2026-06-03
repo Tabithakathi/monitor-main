@@ -1,0 +1,10 @@
+node_modules/
+.vite/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+email_delivery.log
