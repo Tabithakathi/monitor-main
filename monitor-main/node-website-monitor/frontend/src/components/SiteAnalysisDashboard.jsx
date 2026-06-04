@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   FileText, Image, Link, Link2Off, Globe, Layers, CheckCircle2,
   AlertTriangle, AlertCircle, Info, Search, Cpu, Code, Package,
@@ -33,9 +33,17 @@ const CONFIDENCE_LABELS = {
   low:    { label: 'Low (Estimate)', color: 'text-slate-400' },
 };
 
-export default function SiteAnalysisDashboard({ pageAnalysisData, seoData, activeAlerts = [], crawlData = null, crawlLoading = false }) {
+export default function SiteAnalysisDashboard({ pageAnalysisData, seoData, activeAlerts = [], crawlData = null, crawlLoading = false, altHighlight = false }) {
   const [techFilter, setTechFilter] = useState('');
   const [imgPageFilter, setImgPageFilter] = useState('all');
+  const altSectionRef = useRef(null);
+
+  // Auto-scroll + highlight when altHighlight prop is set
+  useEffect(() => {
+    if (altHighlight && altSectionRef.current) {
+      altSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [altHighlight]);
 
   if (!pageAnalysisData && !seoData && !crawlData && !crawlLoading) {
     return (
@@ -306,7 +314,11 @@ export default function SiteAnalysisDashboard({ pageAnalysisData, seoData, activ
       </div>
 
       {/* ── Row 3: Image Analysis ─────────────────────────────────────────── */}
-      <div className="glass-card p-6">
+      <div
+        id="alt-section"
+        ref={altSectionRef}
+        className={`glass-card p-6 transition-all duration-500 ${altHighlight ? 'ring-2 ring-rose-400 ring-offset-2 ring-offset-transparent' : ''}`}
+      >
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-5">
           <h3 className="text-slate-200 font-extrabold text-base flex items-center gap-2">
             <Image className="text-indigo-400 h-5 w-5" />

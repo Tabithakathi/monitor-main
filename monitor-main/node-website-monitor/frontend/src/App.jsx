@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import { ShieldCheck, ShieldAlert, Activity, Cpu, Search, RefreshCw, AlertTriangle, AlertCircle, BellRing, Sun, Moon } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Activity, Cpu, Search, RefreshCw, AlertTriangle, AlertCircle, BellRing, Sun, Moon, X } from 'lucide-react';
 import UptimeDashboard from './components/UptimeDashboard';
 import WordPressDashboard from './components/WordPressDashboard';
 import SSLMonitor from './components/SSLMonitor';
@@ -30,7 +30,27 @@ export default function App() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [crawlData, setCrawlData] = useState(null);
   const [crawlLoading, setCrawlLoading] = useState(false);
-  const [scanProgress, setScanProgress] = useState(null); // null = idle, object = scanning
+  const [scanProgress, setScanProgress] = useState(null);
+
+  // ── NEW: Search autocomplete state ────────────────────────────────────────
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [dropdownItems, setDropdownItems] = useState([]);
+  const searchRef = useRef(null);
+
+  // ── NEW: Navigate-to-SiteAnalysis-ALT callback (passed to SeoDashboard) ──
+  const [siteAnalysisAltHighlight, setSiteAnalysisAltHighlight] = useState(false);
+
+  const handleNavigateToAlt = useCallback(() => {
+    setActiveTab('site_analysis');
+    setSiteAnalysisAltHighlight(true);
+    // auto-clear highlight after 3s
+    setTimeout(() => setSiteAnalysisAltHighlight(false), 3000);
+    // Scroll to top so SiteAnalysis is visible
+    setTimeout(() => {
+      const el = document.getElementById('alt-section');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+  }, []);
 
   // Fetch unique audited SRE target list
   const fetchTargets = async () => {
@@ -46,6 +66,32 @@ export default function App() {
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [isDark, setIsDark] = useState(true);
+
+  // Filter dropdown items whenever url or targets change
+  useEffect(() => {
+    if (!url.trim() || url.length < 2) {
+      setDropdownItems([]);
+      setShowDropdown(false);
+      return;
+    }
+    const q = url.toLowerCase().replace(/^https?:\/\//i, '');
+    const matched = targets.filter(t =>
+      t.url.toLowerCase().replace(/^https?:\/\//i, '').includes(q)
+    ).slice(0, 8);
+    setDropdownItems(matched);
+    setShowDropdown(matched.length > 0);
+  }, [url, targets]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Effect to toggle light/dark theme class on document.body dynamically
   useEffect(() => {
@@ -120,15 +166,21 @@ export default function App() {
 
     setAuditLoading(true);
 
+    // ── Scan performance logging ──────────────────────────────────────────
+    const scanStart = performance.now();
+    console.group(`🔍 SRE Scan Performance — ${formattedUrl}`);
+    console.log(`▶ Scan Started: ${new Date().toISOString()}`);
+    console.log(`  Target: ${formattedUrl}`);
+
     // Animated scan progress steps
     const STEPS = [
-      { label: 'Discovering Pages',     pct: 8  },
-      { label: 'Crawling Website',       pct: 18 },
+      { label: 'Scanning Website',      pct: 8  },
+      { label: 'Checking Pages',         pct: 18 },
       { label: 'Checking SEO',           pct: 32 },
       { label: 'Checking SSL',           pct: 45 },
       { label: 'Checking Performance',   pct: 58 },
       { label: 'Checking Images',        pct: 68 },
-      { label: 'Checking Broken Links',  pct: 78 },
+      { label: 'Checking Links',         pct: 78 },
       { label: 'Running Security Scan',  pct: 88 },
       { label: 'Generating Report',      pct: 96 },
     ];
@@ -137,6 +189,8 @@ export default function App() {
     const stepTimer = setInterval(() => {
       stepIdx = Math.min(stepIdx + 1, STEPS.length - 1);
       setScanProgress({ label: STEPS[stepIdx].label, pct: STEPS[stepIdx].pct });
+      const elapsed = ((performance.now() - scanStart) / 1000).toFixed(2);
+      console.log(`  ⏱ [${elapsed}s] ${STEPS[stepIdx].label}...`);
     }, 900);
 
     try {
@@ -144,9 +198,16 @@ export default function App() {
       clearInterval(stepTimer);
       setScanProgress({ label: 'Scan Complete!', pct: 100 });
 
+      // ── Log scan completion ───────────────────────────────────────────
+      const scanEnd = performance.now();
+      const totalDuration = ((scanEnd - scanStart) / 1000).toFixed(2);
+      console.log(`✅ Scan Finished: ${new Date().toISOString()}`);
+      console.log(`⏳ Total Scan Duration: ${totalDuration}s`);
+      console.groupEnd();
+
       if (response.data.success) {
         setTimeout(() => setScanProgress(null), 1200);
-        showToast('Site SRE audit scan completed successfully!', 'success');
+        showToast(`Scan completed in ${totalDuration}s`, 'success');
         if (response.data.stats) {
           setStats(response.data.stats);
         }
@@ -154,15 +215,22 @@ export default function App() {
 
         setCrawlData(null);
         setCrawlLoading(true);
+        const crawlStart = performance.now();
+        console.log(`🕷 Crawl started for ${formattedUrl}`);
         axios.post(`${API_BASE}/crawl`, { url: formattedUrl })
-          .then(crawlResp => { if (crawlResp.data.success) setCrawlData(crawlResp.data); })
+          .then(crawlResp => {
+            if (crawlResp.data.success) setCrawlData(crawlResp.data);
+            console.log(`🕷 Crawl finished in ${((performance.now() - crawlStart) / 1000).toFixed(2)}s`);
+          })
           .catch(() => {})
           .finally(() => setCrawlLoading(false));
       }
     } catch (err) {
       clearInterval(stepTimer);
       setScanProgress(null);
-      console.error(err);
+      const scanEnd = performance.now();
+      console.error(`❌ Scan failed after ${((scanEnd - scanStart) / 1000).toFixed(2)}s`, err);
+      console.groupEnd();
       showToast(err.response?.data?.error || 'Scan execution failed.', 'error');
     } finally {
       setAuditLoading(false);
@@ -281,16 +349,63 @@ export default function App() {
 
           {/* SRE Domain search filter bar */}
           <div className="flex-1 max-w-xl flex gap-2">
-            <div className="flex-1 bg-dark-900 border border-slate-800/80 rounded-xl px-3.5 flex items-center gap-2 focus-within:border-indigo-500/70 transition-all shadow-inner">
-              <Search className="text-slate-500 h-4 w-4" />
-              <input
-                type="text"
-                placeholder="Enter domain URL (e.g. wordpress.org)"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                className="bg-transparent border-none outline-none text-xs w-full text-slate-200 placeholder-slate-600"
-                onKeyDown={(e) => e.key === 'Enter' && fetchStats()}
-              />
+            <div className="flex-1 relative" ref={searchRef}>
+              <div className="bg-dark-900 border border-slate-800/80 rounded-xl px-3.5 flex items-center gap-2 focus-within:border-indigo-500/70 transition-all shadow-inner">
+                <Search className="text-slate-500 h-4 w-4 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Enter domain URL (e.g. wordpress.org)"
+                  value={url}
+                  onChange={(e) => { setUrl(e.target.value); setShowDropdown(true); }}
+                  className="bg-transparent border-none outline-none text-xs w-full text-slate-200 placeholder-slate-600 py-2"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { setShowDropdown(false); fetchStats(); }
+                    if (e.key === 'Escape') setShowDropdown(false);
+                  }}
+                  onFocus={() => { if (dropdownItems.length > 0) setShowDropdown(true); }}
+                  autoComplete="off"
+                />
+                {url && (
+                  <button onClick={() => { setUrl(''); setShowDropdown(false); }} className="text-slate-600 hover:text-slate-400 transition-colors">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Autocomplete dropdown */}
+              {showDropdown && dropdownItems.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1.5 z-[9999] rounded-xl border border-slate-700/80 overflow-hidden shadow-2xl"
+                  style={{ background: 'rgba(10,12,28,0.97)', backdropFilter: 'blur(16px)' }}>
+                  <div className="px-3 py-1.5 border-b border-slate-800/60">
+                    <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Previously Scanned</span>
+                  </div>
+                  {dropdownItems.map((t, i) => {
+                    let hostname = t.url;
+                    try { hostname = new URL(t.url).hostname; } catch (e) {}
+                    return (
+                      <button
+                        key={i}
+                        className="w-full flex items-center gap-3 px-3.5 py-2.5 hover:bg-indigo-500/10 transition-colors text-left group"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setUrl(t.url);
+                          setShowDropdown(false);
+                          fetchStats(t.url);
+                        }}
+                      >
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${t.isUp ? 'bg-emerald-400' : 'bg-rose-500'}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-200 truncate group-hover:text-indigo-300 transition-colors">{hostname}</p>
+                          <p className="text-[9px] text-slate-500 font-mono truncate">{t.url}</p>
+                        </div>
+                        <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded-full border ${t.isUp ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10' : 'text-rose-400 border-rose-500/25 bg-rose-500/10'}`}>
+                          {t.isUp ? 'ONLINE' : 'DOWN'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <button
@@ -421,7 +536,7 @@ export default function App() {
               <SSLMonitor sslData={stats?.sslData} securityData={stats?.securityData} />
             )}
             {activeTab === 'seo' && (
-              <SeoDashboard seoData={stats?.seoData} crawlData={crawlData} />
+              <SeoDashboard seoData={stats?.seoData} crawlData={crawlData} onNavigateToAlt={handleNavigateToAlt} />
             )}
             {activeTab === 'accessibility' && (
               <AccessibilityAudit 
@@ -436,6 +551,7 @@ export default function App() {
                 activeAlerts={stats?.activeAlerts}
                 crawlData={crawlData}
                 crawlLoading={crawlLoading}
+                altHighlight={siteAnalysisAltHighlight}
               />
             )}
             {activeTab === 'malware' && (

@@ -4,7 +4,7 @@ import {
   Search, Link, Image, Globe, Sparkles 
 } from 'lucide-react';
 
-export default function SeoDashboard({ seoData, crawlData = null }) {
+export default function SeoDashboard({ seoData, crawlData = null, onNavigateToAlt }) {
   const [altSearch, setAltSearch] = useState('');
 
   if (!seoData) {
@@ -80,8 +80,7 @@ export default function SeoDashboard({ seoData, crawlData = null }) {
             <h2 className="text-2xl font-black tracking-tight text-violet-400">{imageAnalysis?.totalImages || 0}</h2>
             <p className="text-[10px] mt-1 font-bold text-slate-500">Detected on page</p>
           </div>
-        </div>
-        <div className="glass-card p-4 flex flex-col justify-between">
+        </div>        <div className="glass-card p-4 flex flex-col justify-between">
           <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Internal Links</span>
           <div className="mt-2">
             <h2 className="text-2xl font-black tracking-tight text-sky-400">{links?.internalCount || 0}</h2>
@@ -402,9 +401,22 @@ export default function SeoDashboard({ seoData, crawlData = null }) {
               </div>
               <div className="p-3 bg-dark-800/30 rounded-xl border border-slate-800/60">
                 <span className="text-slate-500 text-[10px] font-bold block uppercase mb-1">Missing ALT</span>
-                <span className="text-lg font-black text-rose-455">
+                <span
+                  className={`text-lg font-black cursor-pointer hover:opacity-80 transition-opacity group relative ${(imageAnalysis?.missingAlt || 0) + (imageAnalysis?.emptyAlt || 0) > 0 ? 'text-rose-455' : 'text-emerald-400'}`}
+                  onClick={() => { if (onNavigateToAlt && ((imageAnalysis?.missingAlt || 0) + (imageAnalysis?.emptyAlt || 0) > 0)) onNavigateToAlt(); }}
+                  title="Click to view Missing ALT details in Site Analysis"
+                  style={{ borderBottom: (imageAnalysis?.missingAlt || 0) + (imageAnalysis?.emptyAlt || 0) > 0 ? '1.5px dashed currentColor' : 'none', cursor: (imageAnalysis?.missingAlt || 0) + (imageAnalysis?.emptyAlt || 0) > 0 ? 'pointer' : 'default' }}
+                >
                   {(imageAnalysis?.missingAlt || 0) + (imageAnalysis?.emptyAlt || 0)}
+                  {(imageAnalysis?.missingAlt || 0) + (imageAnalysis?.emptyAlt || 0) > 0 && (
+                    <span className="ml-1 text-[9px] font-bold text-rose-400 opacity-70">↗</span>
+                  )}
                 </span>
+                {(imageAnalysis?.missingAlt || 0) + (imageAnalysis?.emptyAlt || 0) > 0 && onNavigateToAlt && (
+                  <p className="text-[9px] text-rose-400 mt-0.5 font-bold cursor-pointer hover:underline" onClick={onNavigateToAlt}>
+                    Click to view →
+                  </p>
+                )}
               </div>
             </div>
             <p className="text-[10px] text-slate-400 leading-relaxed italic">{imageAnalysis?.message}</p>

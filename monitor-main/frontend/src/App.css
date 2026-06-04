@@ -1930,3 +1930,268 @@ a:hover {
   color: var(--primary-light, var(--primary));
   text-decoration: underline;
 }
+
+
+/* ==========================================
+   ITEM 11 — FONT IMPROVEMENTS
+   Global size lifts for tables, cards,
+   metrics, warnings, and dashboard labels
+   ========================================== */
+
+/* Tables — comfortable reading size */
+table td,
+table th {
+  font-size: 14px !important;
+  line-height: 1.55;
+}
+
+/* Card metric values — large and bold */
+.metric-value {
+  font-size: 2.4rem !important;
+}
+
+/* Card headings / labels */
+.card h3 {
+  font-size: 15px !important;
+  letter-spacing: 0.04em;
+}
+
+/* Card footer text */
+.card-footer {
+  font-size: 13px !important;
+}
+
+/* Badge text — slightly larger for readability */
+.badge {
+  font-size: 12px !important;
+  padding: 4px 11px !important;
+}
+
+/* Details panel headings */
+.details-panel h3 {
+  font-size: 17px !important;
+}
+
+/* Sidebar nav items */
+.sidebar ul li {
+  font-size: 15px !important;
+}
+
+/* Progress labels */
+.progress-label {
+  font-size: 13px !important;
+}
+
+/* Audit list items */
+.audit-list li {
+  font-size: 14px !important;
+}
+
+/* Hero card description text */
+.hero-card p {
+  font-size: 15px !important;
+  line-height: 1.7;
+}
+
+/* ==========================================
+   ITEM 12 — LIGHT THEME IMPROVEMENTS
+   Replace dull grey with light blue / indigo
+   tints. Better contrast, softer on the eye.
+   ========================================== */
+
+/* Light mode — replace grey-ish surfaces with blue-tinted whites */
+.app.light {
+  --bg-app:            #eef3fb !important;   /* soft blue-grey page bg */
+  --bg-surface:        #ffffff !important;
+  --bg-surface-low:    #f0f5ff !important;   /* light indigo tint */
+  --bg-surface-lowest: #e8eeff !important;   /* deeper indigo tint */
+  --bg-surface-high:   #dce6f8 !important;   /* blue-tinted divider area */
+  --bg-surface-highest:#c9d8f2 !important;
+  --border-color:      #c8d7ee !important;
+  --border-color-high: #a9bfdf !important;
+}
+
+/* Light mode cards — soft blue backgrounds */
+.app.light .card {
+  background: linear-gradient(145deg, #ffffff 0%, #f2f7ff 100%) !important;
+  border-color: #ccd9f0 !important;
+}
+
+.app.light .card.accent-blue  { border-top-color: #1558d6 !important; }
+.app.light .card.accent-green { border-top-color: #15803d !important; }
+.app.light .card.accent-purple{ border-top-color: #6d28d9 !important; }
+.app.light .card.accent-orange{ border-top-color: #b45309 !important; }
+.app.light .card.accent-red   { border-top-color: #c02020 !important; }
+
+/* Light mode details panels — clean white with blue accent border */
+.app.light .details-panel {
+  background: #ffffff !important;
+  border-color: #d0ddf2 !important;
+  box-shadow: 0 2px 16px rgba(21, 88, 214, 0.06) !important;
+}
+
+/* Light mode sidebar — blue-tinted white */
+.app.light .sidebar {
+  background-color: #f4f8ff !important;
+  border-right-color: #c8d7ee !important;
+}
+
+/* Light mode topbar */
+.app.light .topbar {
+  border-bottom-color: #c8d7ee !important;
+}
+
+/* Light mode table headers — soft blue bg */
+.app.light table th {
+  background-color: #eaf1ff !important;
+  color: #2c4a7c !important;
+  border-bottom-color: #c0d0e8 !important;
+}
+
+.app.light table td {
+  border-bottom-color: #dde8f6 !important;
+}
+
+.app.light .zebra-table tbody tr:hover {
+  background-color: #eef4ff !important;
+}
+
+/* Light mode hero card — blue gradient override */
+.app.light .hero-card {
+  background: linear-gradient(135deg, #1a3f7a 0%, #1558d6 55%, #0e46b0 100%) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Light mode login screen — blue-tinted */
+.app.light .login-container {
+  background: linear-gradient(135deg, #ddeaff 0%, #c2d5f8 100%) !important;
+}
+
+/* Light mode modal */
+.app.light .modal-box {
+  background: #ffffff !important;
+  border-color: #c8d7ee !important;
+  box-shadow: 0 20px 60px rgba(21, 88, 214, 0.12) !important;
+}
+
+/* Light mode badge info — blue on light bg */
+.app.light .badge.info {
+  background-color: #dbeafe !important;
+  color: #1558d6 !important;
+  border-color: #93c5fd !important;
+}
+
+.app.light .badge.ok {
+  background-color: #dcfce7 !important;
+  color: #15803d !important;
+  border-color: #86efac !important;
+}
+
+.app.light .badge.warning {
+  background-color: #fef9c3 !important;
+  color: #854d0e !important;
+  border-color: #fde047 !important;
+}
+
+.app.light .badge.critical {
+  background-color: #fee2e2 !important;
+  color: #991b1b !important;
+  border-color: #fca5a5 !important;
+}
+
+/* Light mode buttons */
+.app.light .scan-btn {
+  box-shadow: 0 4px 14px rgba(21, 88, 214, 0.22) !important;
+}
+
+.app.light .theme-btn {
+  background-color: #f0f6ff !important;
+  border-color: #c0d0e8 !important;
+  color: #0e1f38 !important;
+}
+
+.app.light .theme-btn:hover {
+  background-color: #dde8f8 !important;
+}
+
+/* Light mode audit list items */
+.app.light .audit-list li {
+  background-color: #f4f8ff !important;
+  border-color: #c8d7ee !important;
+}
+
+.app.light .audit-list li:hover {
+  background-color: #dde8f8 !important;
+}
+
+/* Light mode progress track */
+.app.light .progress-track {
+  background-color: #dde8f8 !important;
+}
+
+/* ==========================================
+   ITEM 15 — UI CONSISTENCY
+   Uniform card, badge, spacing across all tabs
+   ========================================== */
+
+/* Tab content consistent entry animation */
+.tab-content {
+  animation: fadeIn 0.25s ease;
+}
+
+/* Consistent panel spacing */
+.details-panel + .details-panel {
+  margin-top: 24px;
+}
+
+/* Consistent warning badge cursor */
+.badge.warning,
+.badge.critical {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.badge.warning:hover,
+.badge.critical:hover {
+  opacity: 0.8;
+}
+
+/* Consistent table row hover */
+.table-row-hover:hover {
+  background-color: var(--primary-glow) !important;
+  cursor: pointer;
+}
+
+/* Admin dashboard metric cards — consistent sizing */
+.admin-metric-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--card-shadow);
+  transition: var(--transition-smooth);
+  cursor: pointer;
+}
+
+.admin-metric-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+  box-shadow: 0 8px 24px var(--primary-glow);
+}
+
+/* SEO section uniform row item */
+.seo-row-item {
+  padding: 12px 16px;
+  background: var(--bg-surface-low);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  transition: var(--transition-smooth);
+}
+
+.seo-row-item:hover {
+  background: var(--bg-surface-high);
+  border-color: var(--border-color-high);
+}

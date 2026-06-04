@@ -3945,21 +3945,38 @@ function App() {
                     </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
                       <div
-                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px', backgroundColor: 'var(--bg-surface-low)', borderRadius: '10px', border: '1px solid var(--border-color)', cursor: data.seo?.alt_tags?.missing_alt_srcs?.length > 0 ? 'pointer' : 'default', transition: 'all 0.2s ease' }}
-                        onClick={() => data.seo?.alt_tags?.missing_alt_srcs?.length > 0 && setSeoDetailModal({ type: 'missing_alt', data: data.seo.alt_tags })}
-                        title={data.seo?.alt_tags?.missing_alt_srcs?.length > 0 ? 'Click to see missing ALT details' : ''}
-                        onMouseOver={e => { if (data.seo?.alt_tags?.missing_alt_srcs?.length > 0) e.currentTarget.style.borderColor = 'var(--primary)'; }}
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px', backgroundColor: 'var(--bg-surface-low)', borderRadius: '10px', border: '1px solid var(--border-color)', cursor: 'pointer', transition: 'all 0.2s ease' }}
+                        onClick={() => {
+                          const srcs = data.seo?.alt_tags?.missing_alt_srcs || [];
+                          const totalImages = data.seo?.alt_tags?.total_images ?? 0;
+                          // Build a simple image list from available data
+                          const imageList = srcs.map(src => ({ src, alt: '', pageUrl: data.url }));
+                          setSeoDetailModal({ type: 'image_details', data: { images: imageList, pageUrl: data.url, totalImages, withAlt: data.seo?.alt_tags?.with_alt ?? 0 } });
+                        }}
+                        title="Click to see all image details"
+                        onMouseOver={e => e.currentTarget.style.borderColor = 'var(--primary)'}
                         onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
                       >
                         <div>
                           <div style={{ fontWeight: '700', fontSize: '0.85rem' }}>Alt text coverage</div>
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                            Images with Alt: {data.seo?.alt_tags?.with_alt ?? 0} / {data.seo?.alt_tags?.total_images ?? 0}
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span
+                              style={{ color: 'var(--primary)', fontWeight: '700', cursor: 'pointer', textDecoration: 'underline' }}
+                              title="Click to view all images"
+                            >
+                              {data.seo?.alt_tags?.total_images ?? 0} Total Images
+                            </span>
+                            — {data.seo?.alt_tags?.with_alt ?? 0} with ALT
                           </div>
                         </div>
-                        <span className={getBadgeClass(data.seo?.alt_tags?.status)}>
-                          {data.seo?.alt_tags?.status?.toUpperCase() || 'OK'}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                          <span className={getBadgeClass(data.seo?.alt_tags?.status)}>
+                            {data.seo?.alt_tags?.status?.toUpperCase() || 'OK'}
+                          </span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            <span className="material-icons" style={{ fontSize: '12px' }}>touch_app</span>View Images
+                          </span>
+                        </div>
                       </div>
 
                       {data.seo?.alt_tags?.missing_alt_srcs?.length > 0 && (
@@ -5569,10 +5586,10 @@ function App() {
                 borderRadius: '24px',
                 border: darkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.06)',
                 boxShadow: '0 20px 50px rgba(0, 0, 0, 0.15)',
-                fontFamily: 'Google Sans, Roboto, sans-serif',
+                fontFamily: 'var(--font-body)',
                 textAlign: 'left'
               }} className="animate-fade">
-                
+
                 {/* Header info */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '20px' }}>
                   <div>
@@ -5580,147 +5597,68 @@ function App() {
                       <span className="material-icons animate-pulse" style={{ color: 'var(--primary)', fontSize: '22px' }}>sensors</span>
                       SRE Telemetry Live Audit
                     </h2>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                      <span>Target Host:</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      <span>Target:</span>
                       <strong style={{ color: 'var(--text-main)' }}>{url || "unspecified"}</strong>
-                      <span className="status-dot animate-pulse" style={{ width: '6px', height: '6px', backgroundColor: 'var(--primary)' }}></span>
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--primary)', display: 'inline-block', animation: 'pulse 1.5s infinite' }}></span>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span className="badge info" style={{ padding: '6px 12px', borderRadius: '6px', fontSize: '0.72rem', letterSpacing: '0.04em', fontWeight: '700', textTransform: 'uppercase' }}>
-                      {activeScanPhase || "Scanning..."}
-                    </span>
-                  </div>
+                  <span className="badge info" style={{ padding: '6px 14px', fontSize: '0.8rem', fontWeight: '700' }}>
+                    {activeScanPhase || "Initializing..."}
+                  </span>
                 </div>
 
-                {/* Progress bar container */}
-                <div style={{ width: '100%', marginBottom: '24px' }}>
+                {/* Stage step indicators */}
+                {(() => {
+                  const stages = [
+                    { icon: 'language',        label: 'Scanning Website',  pct: 10 },
+                    { icon: 'pageview',        label: 'Checking Pages',    pct: 25 },
+                    { icon: 'search',          label: 'Checking SEO',      pct: 45 },
+                    { icon: 'security',        label: 'Checking SSL',      pct: 60 },
+                    { icon: 'image',           label: 'Checking Images',   pct: 75 },
+                    { icon: 'link',            label: 'Checking Links',    pct: 88 },
+                    { icon: 'assignment_turned_in', label: 'Generating Report', pct: 98 },
+                  ];
+                  return (
+                    <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', marginBottom: '20px', gap: '4px' }}>
+                      {stages.map((s, i) => {
+                        const done = scanProgress >= s.pct;
+                        const active = scanProgress >= (stages[i - 1]?.pct ?? 0) && scanProgress < s.pct;
+                        return (
+                          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px', opacity: done ? 1 : active ? 0.8 : 0.3, transition: 'opacity 0.4s ease' }}>
+                            <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: done ? 'var(--success)' : active ? 'var(--primary)' : 'var(--bg-surface-high)', border: `2px solid ${done ? 'var(--success)' : active ? 'var(--primary)' : 'var(--border-color)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.4s ease' }}>
+                              <span className="material-icons" style={{ fontSize: '15px', color: done || active ? 'white' : 'var(--text-muted)' }}>{done ? 'check' : s.icon}</span>
+                            </div>
+                            <span style={{ fontSize: '0.6rem', fontWeight: '700', color: done ? 'var(--success)' : active ? 'var(--primary)' : 'var(--text-muted)', textAlign: 'center', lineHeight: '1.2', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{s.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Progress bar */}
+                <div style={{ width: '100%', marginBottom: '20px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '0.85rem', fontWeight: '700' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Progress Matrix</span>
+                    <span style={{ color: 'var(--text-muted)' }}>Progress</span>
                     <span style={{ color: 'var(--primary)', fontFamily: 'var(--font-mono)' }}>{scanProgress}%</span>
                   </div>
-                  <div style={{
-                    width: '100%',
-                    height: '8px',
-                    backgroundColor: darkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
-                    borderRadius: '4px',
-                    overflow: 'hidden',
-                    position: 'relative'
-                  }}>
-                    <div style={{
-                      width: `${scanProgress}%`,
-                      height: '100%',
-                      background: 'linear-gradient(90deg, var(--primary) 0%, #60a5fa 100%)',
-                      borderRadius: '4px',
-                      transition: 'width 0.15s ease-out',
-                      boxShadow: '0 0 10px rgba(26, 115, 232, 0.5)'
-                    }}></div>
+                  <div style={{ width: '100%', height: '10px', backgroundColor: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: '99px', overflow: 'hidden' }}>
+                    <div style={{ width: `${scanProgress}%`, height: '100%', background: 'linear-gradient(90deg, var(--primary) 0%, #60a5fa 100%)', borderRadius: '99px', transition: 'width 0.2s ease-out', boxShadow: '0 0 10px rgba(29, 111, 240, 0.4)' }}></div>
                   </div>
                 </div>
 
-                {/* Visual grid layout shift scanner preview */}
-                <div style={{
-                  width: '100%',
-                  height: '80px',
-                  background: darkMode ? 'rgba(7, 9, 17, 0.6)' : 'rgba(0, 0, 0, 0.03)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '12px',
-                  marginBottom: '20px',
-                  position: 'relative',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  {/* Grid lines background */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '0',
-                    left: '0',
-                    right: '0',
-                    bottom: '0',
-                    backgroundImage: darkMode ? 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)' : 'linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.02) 1px, transparent 1px)',
-                    backgroundSize: '15px 15px'
-                  }}></div>
-
-                  {/* Pulsating green bounding box mock layout shift */}
-                  <div style={{
-                    width: '120px',
-                    height: '35px',
-                    border: '1.5px dashed var(--primary)',
-                    borderRadius: '6px',
-                    background: 'var(--primary-glow)',
-                    position: 'relative',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '0.62rem',
-                    fontWeight: '800',
-                    color: 'var(--primary)',
-                    letterSpacing: '0.04em',
-                    boxShadow: '0 0 10px rgba(26,115,232,0.15)',
-                    animation: 'pulse 2s infinite ease-in-out'
-                  }}>
-                    BOUNDS CHECK
-                  </div>
-
-                  {/* Sweeping laser scanner line */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '0',
-                    left: '0',
-                    right: '0',
-                    height: '2px',
-                    background: 'linear-gradient(90deg, transparent, var(--primary), transparent)',
-                    boxShadow: '0 0 8px var(--primary)',
-                    animation: 'sweep 2.5s infinite linear'
-                  }}></div>
-                </div>
-
-                {/* UNIX Style SRE Shell Console Terminal */}
-                <div style={{
-                  width: '100%',
-                  height: '280px',
-                  backgroundColor: '#05070c',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '12px',
-                  padding: '16px',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.82rem',
-                  overflowY: 'auto',
-                  boxShadow: 'inset 0 4px 15px rgba(0,0,0,0.6)',
-                  color: '#94a3b8',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px'
-                }}>
+                {/* Live scan log terminal */}
+                <div style={{ width: '100%', height: '220px', backgroundColor: '#03080f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '14px 16px', fontFamily: 'var(--font-mono)', fontSize: '0.82rem', overflowY: 'auto', boxShadow: 'inset 0 4px 15px rgba(0,0,0,0.6)', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {scanLogs.map((log, index) => {
                     let color = '#94a3b8';
                     let icon = 'info';
                     let iconColor = '#38bdf8';
-                    
-                    if (log.type === 'success') {
-                      color = '#34d399';
-                      icon = 'check_circle';
-                      iconColor = '#34d399';
-                    } else if (log.type === 'warning') {
-                      color = '#fbbf24';
-                      icon = 'warning';
-                      iconColor = '#fbbf24';
-                    } else if (log.type === 'error') {
-                      color = '#f87171';
-                      icon = 'error';
-                      iconColor = '#f87171';
-                    }
-
+                    if (log.type === 'success') { color = '#34d399'; icon = 'check_circle'; iconColor = '#34d399'; }
+                    else if (log.type === 'warning') { color = '#fbbf24'; icon = 'warning'; iconColor = '#fbbf24'; }
+                    else if (log.type === 'error') { color = '#f87171'; icon = 'error'; iconColor = '#f87171'; }
                     return (
-                      <div key={index} style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '8px',
-                        lineHeight: '1.4',
-                        animation: 'fadeIn 0.2s ease-out'
-                      }}>
+                      <div key={index} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', lineHeight: '1.4', animation: 'fadeIn 0.2s ease-out' }}>
                         <span className="material-icons" style={{ fontSize: '14px', color: iconColor, marginTop: '2px' }}>{icon}</span>
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem', whiteSpace: 'nowrap', width: '65px' }}>[{log.time}]</span>
                         <span style={{ color }}>{log.text}</span>
@@ -5730,44 +5668,28 @@ function App() {
                   <div ref={scanTerminalEndRef}></div>
                 </div>
 
-                {/* Footer specs / cpu metrics */}
-                <div style={{
-                  width: '100%',
-                  marginTop: '16px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: '0.75rem',
-                  color: 'var(--text-muted)',
-                  borderTop: '1px solid var(--border-color)',
-                  paddingTop: '14px'
-                }}>
+                {/* Footer status */}
+                <div style={{ width: '100%', marginTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className="material-icons animate-spin" style={{ fontSize: '12px', color: 'var(--primary)' }}>sync</span>
+                      <span className="material-icons" style={{ fontSize: '12px', color: 'var(--primary)', animation: 'spin 1s linear infinite' }}>sync</span>
                       <span>SRE CORE: ACTIVE</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span className="material-icons" style={{ fontSize: '12px', color: 'var(--success)' }}>memory</span>
-                      <span>CPU LOAD: 14.8%</span>
+                      <span>ENGINE: RUNNING</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span className="status-dot animate-pulse" style={{ width: '5px', height: '5px', backgroundColor: 'var(--success)' }}></span>
+                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: 'var(--success)', display: 'inline-block', animation: 'pulse 1.5s infinite' }}></span>
                     <span>SECURE TUNNEL (TLS 1.3)</span>
                   </div>
                 </div>
 
                 <style>{`
-                  @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(4px); }
-                    to { opacity: 1; transform: translateY(0); }
-                  }
-                  @keyframes sweep {
-                    0% { transform: translateY(0); }
-                    50% { transform: translateY(78px); }
-                    100% { transform: translateY(0); }
-                  }
+                  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+                  @keyframes sweep { 0% { transform: translateY(0); } 50% { transform: translateY(78px); } 100% { transform: translateY(0); } }
+                  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
                 `}</style>
               </div>
             )}
@@ -5842,6 +5764,273 @@ function App() {
               <button className="btn" onClick={() => setShowSupport(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={() => { alert("Infrastructure ticket filed successfully!"); setShowSupport(false); }}>Submit Ticket</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SEO DETAIL MODAL ─────────────────────────────────────────────── */}
+      {seoDetailModal && (
+        <div className="modal-overlay" onClick={() => setSeoDetailModal(null)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '780px' }}>
+            <button className="modal-close" onClick={() => setSeoDetailModal(null)}>×</button>
+
+            {/* ── MISSING ALT ── */}
+            {seoDetailModal.type === 'missing_alt' && (
+              <>
+                <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--error)' }}>
+                  <span className="material-icons">image_not_supported</span>
+                  Missing ALT Tags — {seoDetailModal.data?.missing_alt_srcs?.length ?? 0} Images
+                </h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '12px 0 20px' }}>
+                  These images are missing ALT text. ALT text is required for accessibility and SEO.
+                  Each image should have a descriptive ALT attribute.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '60vh', overflowY: 'auto' }}>
+                  {(seoDetailModal.data?.missing_alt_srcs || []).map((src, i) => {
+                    const filename = src.split('/').pop() || src;
+                    const suggested = filename.replace(/[-_]/g, ' ').replace(/\.[^.]+$/, '').replace(/\b\w/g, c => c.toUpperCase()) || 'Descriptive image alt text';
+                    return (
+                      <div key={i} style={{ padding: '16px', background: 'var(--bg-surface-low)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                        <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                          {/* Image preview */}
+                          <div style={{ width: '80px', height: '60px', borderRadius: '8px', background: 'var(--bg-surface-high)', border: '1px solid var(--border-color)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <img
+                              src={src}
+                              alt=""
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onError={e => { e.target.style.display = 'none'; e.target.parentNode.innerHTML = '<span class="material-icons" style="color:var(--text-muted);font-size:28px">broken_image</span>'; }}
+                            />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Image URL</div>
+                            <div style={{ fontSize: '0.82rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', color: 'var(--text-main)', marginBottom: '8px' }}>{src}</div>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                              <span style={{ fontSize: '0.75rem', background: 'var(--error-glow)', color: 'var(--error)', padding: '3px 8px', borderRadius: '99px', fontWeight: '700', border: '1px solid var(--error)' }}>Current ALT: (empty)</span>
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                              <strong>Suggested ALT:</strong> <span style={{ color: 'var(--success)', fontStyle: 'italic' }}>{suggested}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                          <button className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '0.8rem' }} onClick={() => window.open(src, '_blank')}>
+                            <span className="material-icons" style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>open_in_new</span>Open Image
+                          </button>
+                          <button className="btn" style={{ padding: '6px 14px', fontSize: '0.8rem' }} onClick={() => window.open(seoDetailModal.data?.page_url || '#', '_blank')}>
+                            <span className="material-icons" style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>web</span>Open Page
+                          </button>
+                          <button className="btn" style={{ padding: '6px 14px', fontSize: '0.8rem' }} onClick={() => { navigator.clipboard.writeText(src); }}>
+                            <span className="material-icons" style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>content_copy</span>Copy URL
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(!seoDetailModal.data?.missing_alt_srcs || seoDetailModal.data.missing_alt_srcs.length === 0) && (
+                    <div style={{ textAlign: 'center', padding: '40px', color: 'var(--success)' }}>
+                      <span className="material-icons" style={{ fontSize: '48px', display: 'block', marginBottom: '8px' }}>check_circle</span>
+                      No missing ALT tags found!
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* ── BROKEN LINKS ── */}
+            {seoDetailModal.type === 'broken_links' && (
+              <>
+                <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--error)' }}>
+                  <span className="material-icons">link_off</span>
+                  Broken Links — {seoDetailModal.data?.broken_links?.length ?? seoDetailModal.data?.broken_count ?? 0} Found
+                </h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '12px 0 20px' }}>
+                  These links returned error status codes. Fix or remove them to avoid SEO penalties and poor user experience.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '60vh', overflowY: 'auto' }}>
+                  {(seoDetailModal.data?.broken_links || []).map((link, i) => {
+                    const code = link.status_code || link.statusCode || 'ERR';
+                    const errType = code === 404 ? 'Not Found' : code === 403 ? 'Forbidden' : code === 500 ? 'Server Error' : code === 0 || code === 'ERR' ? 'Connection Timeout' : `HTTP ${code}`;
+                    const fix = code === 404 ? 'Remove the link or update to a valid URL.' : code === 403 ? 'Check access permissions or remove the link.' : code === 500 ? 'Contact the destination server owner.' : 'Check network connectivity or update the URL.';
+                    return (
+                      <div key={i} style={{ padding: '16px', background: 'var(--bg-surface-low)', borderRadius: '12px', border: '1.5px solid var(--error)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                          <span className="badge critical">{errType}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>HTTP {code}</span>
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '3px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Broken URL</div>
+                        <div style={{ fontSize: '0.85rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', color: 'var(--error)', marginBottom: '10px' }}>{link.url}</div>
+                        {link.sourcePage && (
+                          <>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '3px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Source Page</div>
+                            <div style={{ fontSize: '0.82rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', color: 'var(--text-main)', marginBottom: '10px' }}>{link.sourcePage}</div>
+                          </>
+                        )}
+                        <div style={{ fontSize: '0.82rem', background: 'var(--warning-glow)', color: 'var(--warning)', padding: '8px 12px', borderRadius: '8px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span className="material-icons" style={{ fontSize: '15px' }}>lightbulb</span>
+                          <strong>Suggested Fix:</strong>&nbsp;{fix}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '0.8rem' }} onClick={() => window.open(link.url, '_blank')}>
+                            <span className="material-icons" style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>open_in_new</span>Open Link
+                          </button>
+                          {link.sourcePage && (
+                            <button className="btn" style={{ padding: '6px 14px', fontSize: '0.8rem' }} onClick={() => window.open(link.sourcePage, '_blank')}>
+                              <span className="material-icons" style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>web</span>Open Source Page
+                            </button>
+                          )}
+                          <button className="btn" style={{ padding: '6px 14px', fontSize: '0.8rem' }} onClick={() => navigator.clipboard.writeText(link.url)}>
+                            <span className="material-icons" style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>content_copy</span>Copy URL
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(!seoDetailModal.data?.broken_links || seoDetailModal.data.broken_links.length === 0) && (
+                    <div style={{ textAlign: 'center', padding: '40px', color: 'var(--success)' }}>
+                      <span className="material-icons" style={{ fontSize: '48px', display: 'block', marginBottom: '8px' }}>check_circle</span>
+                      No broken links found!
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* ── SEO WARNING ── */}
+            {seoDetailModal.type === 'seo_warning' && (
+              <>
+                <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)' }}>
+                  <span className="material-icons">warning</span>
+                  SEO Warning — {seoDetailModal.data?.warning}
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '20px' }}>
+                  {seoDetailModal.data?.url && (
+                    <div style={{ padding: '14px', background: 'var(--bg-surface-low)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                      <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>Page URL</div>
+                      <a href={seoDetailModal.data.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.9rem', wordBreak: 'break-all' }}>{seoDetailModal.data.url}</a>
+                    </div>
+                  )}
+                  {seoDetailModal.data?.title !== undefined && (
+                    <div style={{ padding: '14px', background: 'var(--bg-surface-low)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                      <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                        Page Title <span style={{ color: 'var(--warning)' }}>({seoDetailModal.data?.titleLen ?? 0} chars)</span>
+                      </div>
+                      <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginBottom: '6px' }}>{seoDetailModal.data.title || '(no title)'}</div>
+                      <div style={{ height: '6px', background: 'var(--bg-surface-high)', borderRadius: '99px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.min(100, ((seoDetailModal.data?.titleLen ?? 0) / 70) * 100)}%`, background: (seoDetailModal.data?.titleLen ?? 0) < 30 || (seoDetailModal.data?.titleLen ?? 0) > 60 ? 'var(--warning)' : 'var(--success)', borderRadius: '99px', transition: 'width 0.5s ease' }}></div>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Ideal range: 30–60 characters</div>
+                    </div>
+                  )}
+                  {seoDetailModal.data?.meta !== undefined && (
+                    <div style={{ padding: '14px', background: 'var(--bg-surface-low)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                      <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                        Meta Description <span style={{ color: 'var(--warning)' }}>({seoDetailModal.data?.metaLen ?? 0} chars)</span>
+                      </div>
+                      <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginBottom: '6px' }}>{seoDetailModal.data.meta || '(no meta description)'}</div>
+                      <div style={{ height: '6px', background: 'var(--bg-surface-high)', borderRadius: '99px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.min(100, ((seoDetailModal.data?.metaLen ?? 0) / 200) * 100)}%`, background: (seoDetailModal.data?.metaLen ?? 0) < 70 || (seoDetailModal.data?.metaLen ?? 0) > 160 ? 'var(--warning)' : 'var(--success)', borderRadius: '99px', transition: 'width 0.5s ease' }}></div>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Ideal range: 70–160 characters</div>
+                    </div>
+                  )}
+                  <div style={{ padding: '14px', background: 'var(--warning-glow)', borderRadius: '10px', border: '1px solid var(--warning)', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                    <span className="material-icons" style={{ color: 'var(--warning)', fontSize: '20px', marginTop: '2px' }}>lightbulb</span>
+                    <div>
+                      <div style={{ fontWeight: '700', fontSize: '0.85rem', color: 'var(--warning)', marginBottom: '4px' }}>Recommendation</div>
+                      <div style={{ fontSize: '0.88rem', color: 'var(--text-main)' }}>{seoDetailModal.data?.recommendation}</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+                  <button className="btn btn-primary" onClick={() => setSeoDetailModal(null)}>Got It</button>
+                </div>
+              </>
+            )}
+
+            {/* ── PAGE DETAILS ── */}
+            {seoDetailModal.type === 'page_details' && (
+              <>
+                <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="material-icons" style={{ color: 'var(--primary)' }}>info</span>
+                  Page SEO Details
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '20px' }}>
+                  {[
+                    { label: 'URL', value: seoDetailModal.data?.url, link: true },
+                    { label: 'Title', value: seoDetailModal.data?.title },
+                    { label: 'Meta Description', value: seoDetailModal.data?.meta, full: true },
+                    { label: 'Meta Keywords', value: seoDetailModal.data?.keywords },
+                    { label: 'Canonical URL', value: seoDetailModal.data?.canonical },
+                    { label: 'Last Modified', value: seoDetailModal.data?.lastModified },
+                    { label: 'Last Crawled', value: seoDetailModal.data?.lastCrawled },
+                    { label: 'H1 / H2 / H3', value: `${seoDetailModal.data?.h1 ?? 0} / ${seoDetailModal.data?.h2 ?? 0} / ${seoDetailModal.data?.h3 ?? 0}` },
+                    { label: 'Internal Links', value: seoDetailModal.data?.internalLinks ?? 0 },
+                    { label: 'External Links', value: seoDetailModal.data?.externalLinks ?? 0 },
+                    { label: 'Images', value: seoDetailModal.data?.images ?? 0 },
+                    { label: 'Missing ALT', value: seoDetailModal.data?.missingAlt ?? 0, warn: (seoDetailModal.data?.missingAlt ?? 0) > 0 },
+                  ].map((item, i) => (
+                    <div key={i} style={{ gridColumn: item.full ? '1 / -1' : 'auto', padding: '12px', background: 'var(--bg-surface-low)', borderRadius: '10px', border: `1px solid ${item.warn ? 'var(--error)' : 'var(--border-color)'}` }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>{item.label}</div>
+                      {item.link
+                        ? <a href={item.value} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.85rem', wordBreak: 'break-all' }}>{item.value || '—'}</a>
+                        : <div style={{ fontSize: '0.9rem', color: item.warn ? 'var(--error)' : 'var(--text-main)', fontWeight: item.warn ? '700' : '400' }}>{String(item.value ?? '—')}</div>
+                      }
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px', gap: '8px' }}>
+                  <button className="btn" onClick={() => window.open(seoDetailModal.data?.url, '_blank')}>
+                    <span className="material-icons" style={{ fontSize: '16px', verticalAlign: 'middle', marginRight: '4px' }}>open_in_new</span>Open Page
+                  </button>
+                  <button className="btn btn-primary" onClick={() => setSeoDetailModal(null)}>Close</button>
+                </div>
+              </>
+            )}
+
+            {/* ── IMAGE DETAILS ── */}
+            {seoDetailModal.type === 'image_details' && (
+              <>
+                <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="material-icons" style={{ color: 'var(--primary)' }}>image</span>
+                  Image Details — {seoDetailModal.data?.images?.length ?? 0} Images
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '20px', maxHeight: '60vh', overflowY: 'auto' }}>
+                  {(seoDetailModal.data?.images || []).map((img, i) => (
+                    <div key={i} style={{ padding: '14px', background: 'var(--bg-surface-low)', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                      <div style={{ width: '80px', height: '60px', borderRadius: '8px', background: 'var(--bg-surface-high)', border: '1px solid var(--border-color)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <img src={img.src || img.url} alt={img.alt || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={e => { e.target.style.display = 'none'; e.target.parentNode.innerHTML = '<span class="material-icons" style="color:var(--text-muted);font-size:28px">broken_image</span>'; }}
+                        />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '3px' }}>Image URL</div>
+                        <div style={{ fontSize: '0.82rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', color: 'var(--text-main)', marginBottom: '6px' }}>{img.src || img.url}</div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                          {img.size && <span style={{ fontSize: '0.75rem', background: 'var(--primary-glow)', color: 'var(--primary)', padding: '2px 8px', borderRadius: '99px', fontWeight: '600' }}>Size: {img.size}</span>}
+                          <span style={{ fontSize: '0.75rem', background: img.alt ? 'var(--success-glow)' : 'var(--error-glow)', color: img.alt ? 'var(--success)' : 'var(--error)', padding: '2px 8px', borderRadius: '99px', fontWeight: '600' }}>
+                            ALT: {img.alt || '(missing)'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Page: {img.pageUrl || seoDetailModal.data?.pageUrl || '—'}</div>
+                      </div>
+                      <button className="btn" style={{ padding: '5px 10px', fontSize: '0.78rem', flexShrink: 0 }} onClick={() => window.open(img.src || img.url, '_blank')}>
+                        <span className="material-icons" style={{ fontSize: '13px', verticalAlign: 'middle' }}>open_in_new</span>
+                      </button>
+                    </div>
+                  ))}
+                  {(!seoDetailModal.data?.images || seoDetailModal.data.images.length === 0) && (
+                    <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                      <span className="material-icons" style={{ fontSize: '48px', display: 'block', marginBottom: '8px' }}>image_not_supported</span>
+                      No image data available.
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                  <button className="btn btn-primary" onClick={() => setSeoDetailModal(null)}>Close</button>
+                </div>
+              </>
+            )}
+
           </div>
         </div>
       )}
