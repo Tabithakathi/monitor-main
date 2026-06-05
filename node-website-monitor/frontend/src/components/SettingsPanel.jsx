@@ -19,7 +19,9 @@ export default function SettingsPanel({ showToast }) {
     email_host_user: '',
     email_host_password: '',
     alert_email_recipients: '',
-    alerts_enabled: true
+    alerts_enabled: true,
+    resend_api_key: '',
+    resend_from_email: ''
   });
   const [emailLogs, setEmailLogs] = useState([]);
   const [totalLogsCount, setTotalLogsCount] = useState(0);
@@ -178,6 +180,36 @@ export default function SettingsPanel({ showToast }) {
                       placeholder="••••••••••••••••"
                       value={settings.email_host_password}
                       onChange={e => setSettings(prev => ({ ...prev, email_host_password: e.target.value }))}
+                      className="bg-transparent border-none outline-none text-xs w-full text-slate-250 placeholder-slate-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Resend API Key */}
+                <div className="space-y-2">
+                  <label className="text-slate-400 font-bold uppercase tracking-wider block text-[10px]">Resend API Key</label>
+                  <div className="bg-dark-900 border border-slate-850/60 rounded-xl px-3 py-2.5 flex items-center gap-2 focus-within:border-indigo-500/50 transition-all shadow-inner">
+                    <Key className="text-slate-500 h-4 w-4 shrink-0" />
+                    <input 
+                      type="password"
+                      placeholder="re_xxxxxxxxxxxxxxxxx"
+                      value={settings.resend_api_key || ''}
+                      onChange={e => setSettings(prev => ({ ...prev, resend_api_key: e.target.value }))}
+                      className="bg-transparent border-none outline-none text-xs w-full text-slate-250 placeholder-slate-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Resend From Email */}
+                <div className="space-y-2">
+                  <label className="text-slate-400 font-bold uppercase tracking-wider block text-[10px]">Resend From Email</label>
+                  <div className="bg-dark-900 border border-slate-850/60 rounded-xl px-3 py-2.5 flex items-center gap-2 focus-within:border-indigo-500/50 transition-all shadow-inner">
+                    <Mail className="text-slate-500 h-4 w-4 shrink-0" />
+                    <input 
+                      type="email"
+                      placeholder="onboarding@resend.dev"
+                      value={settings.resend_from_email || ''}
+                      onChange={e => setSettings(prev => ({ ...prev, resend_from_email: e.target.value }))}
                       className="bg-transparent border-none outline-none text-xs w-full text-slate-250 placeholder-slate-600"
                     />
                   </div>

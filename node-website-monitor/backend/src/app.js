@@ -8,6 +8,7 @@ const connectDB = require('./config/db');
 const apiRoutes = require('./routes/api');
 const { startUptimeScheduler } = require('./services/monitorService');
 const { MonitorHistory, WordPressMonitor, Alert } = require('./models/Schemas');
+const emailService = require('./services/emailService');
 
 // Load configurations
 dotenv.config();
@@ -23,6 +24,7 @@ const io = new Server(server, {
 
 // Bind io to Express app instance to be accessible inside controllers
 app.set('io', io);
+emailService.setIoInstance(io);
 
 const PORT = process.env.PORT || 5000;
 
@@ -212,6 +214,9 @@ io.on('connection', (socket) => {
 const startServer = async () => {
   // Establish MongoDB Mongoose connection
   await connectDB();
+  
+  // Initialize background email queue and process any pending emails
+  await emailService.initializeEmailQueue();
   
   // Seed sample mock metrics
   await seedDummyData();

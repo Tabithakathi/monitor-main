@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import { ShieldCheck, ShieldAlert, Activity, Cpu, Search, RefreshCw, AlertTriangle, AlertCircle, BellRing, Sun, Moon, X } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Activity, Cpu, Search, RefreshCw, AlertTriangle, AlertCircle, BellRing, Sun, Moon, X, Clock, Star } from 'lucide-react';
 import UptimeDashboard from './components/UptimeDashboard';
 import WordPressDashboard from './components/WordPressDashboard';
 import SSLMonitor from './components/SSLMonitor';
@@ -39,6 +39,7 @@ export default function App() {
   const [dropdownItems, setDropdownItems] = useState([]);
   const [dropdownSelectedIndex, setDropdownSelectedIndex] = useState(-1);
   const searchRef = useRef(null);
+  const [searchHistory, setSearchHistory] = useState([]);
 
   // Authentication State for Admin Dashboard protection
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -111,22 +112,127 @@ export default function App() {
     showToast('Logged out of Admin Portal.', 'info');
   };
 
-  // Filter dropdown items whenever url or targets change
-  useEffect(() => {
-    if (!url.trim() || url.length < 2) {
-      setDropdownItems([]);
-      setShowDropdown(false);
-      setDropdownSelectedIndex(-1);
-      return;
+  // Fetch search history on mount
+  const fetchSearchHistory = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/search-history`);
+      setSearchHistory(response.data || []);
+    } catch (err) {
+      console.error("Failed to fetch search history:", err);
     }
-    const q = url.toLowerCase().replace(/^https?:\/\//i, '');
-    const matched = targets.filter(t =>
-      t.url.toLowerCase().replace(/^https?:\/\//i, '').includes(q)
-    ).slice(0, 8);
-    setDropdownItems(matched);
-    setShowDropdown(matched.length > 0);
-    setDropdownSelectedIndex(-1);
-  }, [url, targets]);
+  };
+
+  useEffect(() => {
+    fetchSearchHistory();
+  }, []);
+
+  const dropdownGroups = React.useMemo(() => {
+    const query = url.toLowerCase().trim().replace(/^https?:\/\//i, '');
+    
+    // 1. Favorites/Pinned
+    const favs = targets.filter(t => t.isFavorite);
+    const filteredFavs = query 
+      ? favs.filter(t => t.url.toLowerCase().includes(query) || (t.name && t.name.toLowerCase().includes(query)))
+      : favs;
+
+    // 2. Most Monitored (sorted by scanCount desc, showing top 5)
+    // Filter out duplicates that might be in Favorites
+    const monitoredList = [...targets]
+      .sort((a, b) => (b.scanCount || 0) - (a.scanCount || 0))
+      .filter(t => !t.isFavorite)
+      .slice(0, 5);
+    const filteredMonitored = query
+      ? [...targets]
+          .sort((a, b) => (b.scanCount || 0) - (a.scanCount || 0))
+          .filter(t => t.url.toLowerCase().includes(query) || (t.name && t.name.toLowerCase().includes(query)))
+          .slice(0, 5)
+      : monitoredList;
+
+    // 3. Recent Searches (from searchHistory, showing top 5)
+    const filteredRecent = query
+      ? searchHistory.filter(h => h.query.toLowerCase().includes(query)).slice(0, 5)
+      : searchHistory.slice(0, 5);
+
+    // Flatten for keyboard navigation
+    const flat = [];
+    filteredFavs.forEach(t => flat.push({ type: 'website', data: t }));
+    filteredMonitored.forEach(t => flat.push({ type: 'website', data: t }));
+    filteredRecent.forEach(h => flat.push({ type: 'history', data: h }));
+
+    return {
+      favorites: filteredFavs,
+      monitored: filteredMonitored,
+      recent: filteredRecent,
+      flat
+    };
+  }, [url, targets, searchHistory]);
+
+  const toggleFavorite = async (website) => {
+    try {
+      const response = await axios.post(`${API_BASE}/scanned-websites/favorite`, {
+        url: website.url,
+        isFavorite: !website.isFavorite
+      });
+      if (response.data.success) {
+        showToast(
+          !website.isFavorite ? `Pinned ${website.url} to favorites` : `Removed ${website.url} from favorites`,
+          'success'
+        );
+        fetchTargets();
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update favorite status.', 'error');
+    }
+  };
+
+  const renderDropdownWebsiteRow = (t, isSelected, flatIndex) => {
+    let hostname = t.url;
+    try { hostname = new URL(t.url).hostname; } catch (e) {}
+    
+    return (
+      <button
+        key={`web-${t.url}-${t.isFavorite}`}
+        type="button"
+        className={`w-full flex items-center gap-3 px-3.5 py-2 transition-colors text-left group relative ${isSelected ? 'bg-indigo-650/15 text-indigo-300 border-l-2 border-indigo-500' : 'hover:bg-slate-800/40'}`}
+        onMouseDown={(e) => {
+          if (e.target.closest('.star-btn')) return;
+          e.preventDefault();
+          setUrl(t.url);
+          setShowDropdown(false);
+          fetchStats(t.url);
+        }}
+        onMouseEnter={() => setDropdownSelectedIndex(flatIndex)}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${t.isUp ? 'bg-emerald-450' : 'bg-rose-500'}`} />
+        <div className="flex-1 min-w-0">
+          <p className={`text-xs font-bold truncate transition-colors ${isSelected ? 'text-indigo-300' : 'text-slate-200 group-hover:text-indigo-400'}`}>
+            {t.name || hostname}
+          </p>
+          <p className="text-[8px] text-slate-500 font-mono truncate">{t.url}</p>
+        </div>
+
+        {t.scanCount > 1 && (
+          <span className="shrink-0 text-[8px] font-bold text-slate-500 bg-slate-850 px-1.5 py-0.5 rounded-full">
+            {t.scanCount} scans
+          </span>
+        )}
+
+        <button
+          type="button"
+          className="star-btn p-1 rounded-md text-slate-500 hover:text-amber-400 hover:bg-slate-800/60 transition-all cursor-pointer relative z-10"
+          title={t.isFavorite ? "Unpin site" : "Pin site"}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFavorite(t);
+          }}
+        >
+          <Star className={`h-3 w-3 ${t.isFavorite ? 'text-amber-400 fill-amber-400' : 'text-slate-650 hover:text-amber-450'}`} />
+        </button>
+      </button>
+    );
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -189,6 +295,11 @@ export default function App() {
       setStats(response.data);
       if (formattedUrl !== url) {
         setUrl(formattedUrl);
+      }
+      if (formattedUrl.trim()) {
+        axios.post(`${API_BASE}/search-history`, { query: formattedUrl.trim() })
+          .then(() => fetchSearchHistory())
+          .catch(() => {});
       }
     } catch (err) {
       console.error(err);
@@ -258,6 +369,9 @@ export default function App() {
           setStats(response.data.stats);
         }
         fetchTargets();
+        axios.post(`${API_BASE}/search-history`, { query: formattedUrl.trim() })
+          .then(() => fetchSearchHistory())
+          .catch(() => {});
 
         setCrawlData(null);
         setCrawlLoading(true);
@@ -395,8 +509,8 @@ export default function App() {
 
           {/* SRE Domain search filter bar */}
           <div className="flex-1 max-w-xl flex gap-2">
-            <div className="flex-1 relative" ref={searchRef}>
-              <div className="bg-dark-900 border border-slate-800/80 rounded-xl px-3.5 flex items-center gap-2 focus-within:border-indigo-500/70 transition-all shadow-inner">
+            <div className="relative flex-1 group" ref={searchRef} onMouseEnter={() => setShowDropdown(true)}>
+              <div className="bg-dark-900 border border-slate-800 focus-within:border-indigo-500/50 rounded-xl px-3.5 flex items-center gap-2 w-full transition-all">
                 <Search className="text-slate-500 h-4 w-4 shrink-0" />
                 <input
                   type="text"
@@ -405,35 +519,37 @@ export default function App() {
                   onChange={(e) => { setUrl(e.target.value); setShowDropdown(true); }}
                   className="bg-transparent border-none outline-none text-xs w-full text-slate-200 placeholder-slate-600 py-2"
                   onKeyDown={(e) => {
+                    const flatList = dropdownGroups.flat;
                     if (e.key === 'Enter') {
-                      if (showDropdown && dropdownSelectedIndex >= 0 && dropdownSelectedIndex < dropdownItems.length) {
+                      if (showDropdown && dropdownSelectedIndex >= 0 && dropdownSelectedIndex < flatList.length) {
                         e.preventDefault();
-                        const selectedTgt = dropdownItems[dropdownSelectedIndex];
-                        setUrl(selectedTgt.url);
+                        const selected = flatList[dropdownSelectedIndex];
+                        const targetUrl = selected.type === 'website' ? selected.data.url : selected.data.query;
+                        setUrl(targetUrl);
                         setShowDropdown(false);
-                        fetchStats(selectedTgt.url);
+                        fetchStats(targetUrl);
                       } else {
                         setShowDropdown(false);
                         fetchStats();
                       }
                     }
                     if (e.key === 'ArrowDown') {
-                      if (showDropdown && dropdownItems.length > 0) {
+                      if (showDropdown && flatList.length > 0) {
                         e.preventDefault();
-                        setDropdownSelectedIndex(prev => (prev + 1) % dropdownItems.length);
+                        setDropdownSelectedIndex(prev => (prev + 1) % flatList.length);
                       }
                     }
                     if (e.key === 'ArrowUp') {
-                      if (showDropdown && dropdownItems.length > 0) {
+                      if (showDropdown && flatList.length > 0) {
                         e.preventDefault();
-                        setDropdownSelectedIndex(prev => (prev - 1 + dropdownItems.length) % dropdownItems.length);
+                        setDropdownSelectedIndex(prev => (prev - 1 + flatList.length) % flatList.length);
                       }
                     }
                     if (e.key === 'Escape') {
                       setShowDropdown(false);
                     }
                   }}
-                  onFocus={() => { if (dropdownItems.length > 0) setShowDropdown(true); }}
+                  onFocus={() => setShowDropdown(true)}
                   autoComplete="off"
                 />
                 {url && (
@@ -444,41 +560,71 @@ export default function App() {
               </div>
 
               {/* Autocomplete dropdown */}
-              {showDropdown && dropdownItems.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1.5 z-[9999] rounded-xl border border-slate-700/80 overflow-hidden shadow-2xl sre-dropdown">
-                  <div className="px-3 py-1.5 border-b border-slate-800/60 sre-dropdown-header flex justify-between items-center">
-                    <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest sre-dropdown-label">Previously Scanned</span>
-                    <span className="text-[9px] text-slate-500 font-mono sre-dropdown-count">{dropdownItems.length} found</span>
-                  </div>
-                  {dropdownItems.map((t, i) => {
-                    let hostname = t.url;
-                    try { hostname = new URL(t.url).hostname; } catch (e) {}
-                    const isSelected = i === dropdownSelectedIndex;
-                    return (
-                      <button
-                        key={i}
-                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 transition-colors text-left group sre-dropdown-item ${isSelected ? 'sre-dropdown-item-selected' : ''}`}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setUrl(t.url);
-                          setShowDropdown(false);
-                          fetchStats(t.url);
-                        }}
-                        onMouseEnter={() => setDropdownSelectedIndex(i)}
-                      >
-                        <span className={`h-2 w-2 rounded-full shrink-0 ${t.isUp ? 'bg-emerald-400' : 'bg-rose-500'}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-200 truncate group-hover:text-indigo-300 transition-colors sre-dropdown-hostname">{hostname}</p>
-                          <p className="text-[9px] text-slate-500 font-mono truncate sre-dropdown-url">{t.url}</p>
-                        </div>
-                        <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded-full border sre-dropdown-meta ${t.isUp ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10' : 'text-rose-400 border-rose-500/25 bg-rose-500/10'}`}>
-                          {t.isUp ? 'ONLINE' : 'DOWN'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  <div className="px-3 py-1 bg-slate-950/40 border-t border-slate-800/40 text-center sre-dropdown-footer">
-                    <span className="text-[9px] text-slate-600 font-mono sre-dropdown-hint">Use ↑ ↓ Arrow Keys & Enter to Navigate</span>
+              {showDropdown && (dropdownGroups.favorites.length > 0 || dropdownGroups.monitored.length > 0 || dropdownGroups.recent.length > 0) && (
+                <div className="absolute top-full left-0 right-0 mt-1.5 z-[9999] rounded-xl border border-slate-700/80 overflow-hidden shadow-2xl bg-slate-900 sre-dropdown max-h-96 overflow-y-auto">
+                  
+                  {/* Favorites Section */}
+                  {dropdownGroups.favorites.length > 0 && (
+                    <div>
+                      <div className="px-3 py-1.5 border-b border-slate-800/60 bg-slate-950/20 flex items-center justify-between">
+                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">⭐ Pinned & Favorites</span>
+                      </div>
+                      {dropdownGroups.favorites.map((t, index) => {
+                        const flatIndex = dropdownGroups.flat.findIndex(f => f.type === 'website' && f.data.url === t.url);
+                        const isSelected = flatIndex === dropdownSelectedIndex;
+                        return renderDropdownWebsiteRow(t, isSelected, flatIndex);
+                      })}
+                    </div>
+                  )}
+
+                  {/* Most Monitored Section */}
+                  {dropdownGroups.monitored.length > 0 && (
+                    <div className="border-t border-slate-850/50">
+                      <div className="px-3 py-1.5 border-b border-slate-800/60 bg-slate-950/20 flex items-center justify-between">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">📊 Most Scanned</span>
+                      </div>
+                      {dropdownGroups.monitored.map((t, index) => {
+                        const flatIndex = dropdownGroups.flat.findIndex(f => f.type === 'website' && f.data.url === t.url && f.data.isFavorite === t.isFavorite);
+                        const isSelected = flatIndex === dropdownSelectedIndex;
+                        return renderDropdownWebsiteRow(t, isSelected, flatIndex);
+                      })}
+                    </div>
+                  )}
+
+                  {/* Recent Searches Section */}
+                  {dropdownGroups.recent.length > 0 && (
+                    <div className="border-t border-slate-850/50">
+                      <div className="px-3 py-1.5 border-b border-slate-800/60 bg-slate-950/20 flex items-center justify-between">
+                        <span className="text-[9px] font-black text-slate-450 uppercase tracking-widest">⏱️ Recent Searches</span>
+                      </div>
+                      {dropdownGroups.recent.map((h, index) => {
+                        const flatIndex = dropdownGroups.flat.findIndex(f => f.type === 'history' && f.data._id === h._id);
+                        const isSelected = flatIndex === dropdownSelectedIndex;
+                        return (
+                          <button
+                            key={`hist-${h._id}`}
+                            className={`w-full flex items-center gap-3 px-3.5 py-2.5 transition-colors text-left group ${isSelected ? 'bg-indigo-650/15 text-indigo-300' : 'hover:bg-slate-800/40 text-slate-350'}`}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setUrl(h.query);
+                              setShowDropdown(false);
+                              fetchStats(h.query);
+                            }}
+                            onMouseEnter={() => setDropdownSelectedIndex(flatIndex)}
+                          >
+                            <Clock className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                            <span className="text-xs font-semibold truncate flex-1">{h.query}</span>
+                            <span className="text-[8px] text-slate-650 font-mono">
+                              {new Date(h.searchedAt).toLocaleTimeString()}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="px-3 py-1.5 bg-slate-950/40 border-t border-slate-800/40 text-center">
+                    <span className="text-[9px] text-slate-600 font-mono">Use ↑ ↓ Keys & Enter to Select · Star to Pin</span>
                   </div>
                 </div>
               )}

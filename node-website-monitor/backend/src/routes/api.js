@@ -105,24 +105,13 @@ router.post('/test-site-email', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL required.' });
   try {
-    const fs   = require('fs');
-    const path = require('path');
-    const nodemailer = require('nodemailer');
-    const { WebsiteEmailConfig, EmailAlertHistory } = require('../models/Schemas');
+    const { WebsiteEmailConfig } = require('../models/Schemas');
+    const { enqueueEmailAlert } = require('../services/emailService');
 
     const config = await WebsiteEmailConfig.findOne({ url });
     if (!config || !config.alertEmail) {
       return res.status(400).json({ success: false, error: 'No alert email configured for this website. Save an email address in the Email Alerts tab first.' });
     }
-
-    // Load SMTP credentials from global settings
-    const settingsPath = path.join(__dirname, '../../../../sre_settings.json');
-    let smtp = { email_host_user: '', email_host_password: '' };
-    try {
-      if (fs.existsSync(settingsPath)) {
-        smtp = { ...smtp, ...JSON.parse(fs.readFileSync(settingsPath, 'utf8')) };
-      }
-    } catch (e) {}
 
     const recipient = config.alertEmail;
     const subject   = '[Website Monitor] Test Alert — Email Alerts are Working';
@@ -150,41 +139,63 @@ router.post('/test-site-email', async (req, res) => {
       </div>
     </body></html>`;
 
-    let delivered = false;
-    if (smtp.email_host_user && smtp.email_host_password) {
-      try {
-        const isGmail = smtp.email_host_user.toLowerCase().includes('@gmail.com');
-        const transporter = nodemailer.createTransport(
-          isGmail ? {
-            service: 'gmail',
-            auth: { user: smtp.email_host_user, pass: smtp.email_host_password },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000
-          } : {
-            host: process.env.EMAIL_HOST || 'localhost',
-            port: parseInt(process.env.EMAIL_PORT) || 25,
-            secure: process.env.EMAIL_USE_SSL === 'true',
-            auth: { user: smtp.email_host_user, pass: smtp.email_host_password },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000
-          }
-        );
-        await transporter.sendMail({ from: smtp.email_host_user, to: recipient, subject, html });
-        delivered = true;
-      } catch (smtpErr) {
-        return res.status(500).json({ success: false, error: `SMTP Error: ${smtpErr.message}. Check your Gmail credentials in Settings → Gmail Alerts.` });
-      }
-    }
-
-    // Log to history regardless
-    await EmailAlertHistory.create({ url, alertEmail: recipient, alertType: 'test', level: 'info', subject, message: 'Test email sent successfully.', delivered });
+    // Enqueue the email alert in the background queue
+    await enqueueEmailAlert({
+      url,
+      recipient,
+      category: 'test',
+      level: 'info',
+      subject,
+      message: 'Test email enqueued successfully.',
+      html
+    });
 
     res.status(200).json({
       success: true,
-      message: delivered
-        ? `✅ Test email successfully sent to ${recipient}`
-        : `📋 Test logged (SMTP not configured — add Gmail credentials in Settings tab to send real emails)`
+      message: `✅ Test email successfully queued for ${recipient}`
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Search History (NEW) ──────────────────────────────────────────────────────
+router.get('/search-history', async (req, res) => {
+  try {
+    const { SearchHistory } = require('../models/Schemas');
+    const history = await SearchHistory.find().sort({ searchedAt: -1 }).limit(10);
+    res.status(200).json(history);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/search-history', async (req, res) => {
+  const { query } = req.body;
+  if (!query || !query.trim()) {
+    return res.status(400).json({ error: 'Search query required.' });
+  }
+  try {
+    const { SearchHistory } = require('../models/Schemas');
+    const search = await SearchHistory.create({ query: query.trim(), searchedAt: new Date() });
+    res.status(200).json({ success: true, search });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Toggle Scanned Website Favorite (NEW) ────────────────────────────────────
+router.post('/scanned-websites/favorite', async (req, res) => {
+  const { url, isFavorite } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL required.' });
+  try {
+    const { ScannedWebsite } = require('../models/Schemas');
+    const website = await ScannedWebsite.findOneAndUpdate(
+      { url },
+      { isFavorite: !!isFavorite },
+      { upsert: true, new: true }
+    );
+    res.status(200).json({ success: true, website });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

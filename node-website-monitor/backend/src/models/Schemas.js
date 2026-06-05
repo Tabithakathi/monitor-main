@@ -337,17 +337,40 @@ const emailAlertHistorySchema = new mongoose.Schema({
   level:       { type: String, required: true },   // 'info' | 'warning' | 'critical'
   subject:     { type: String, required: true },
   message:     { type: String, required: true },
-  delivered:   { type: Boolean, default: false },
-  sentAt:      { type: Date, default: Date.now }
+  status:      { type: String, enum: ['sending', 'delivered', 'failed', 'bounced'], default: 'sending' },
+  messageId:   { type: String },
+  sentAt:      { type: Date, default: Date.now },
+  deliveredAt: { type: Date },
+  errorReason: { type: String }
+});
+
+const searchHistorySchema = new mongoose.Schema({
+  query: { type: String, required: true },
+  searchedAt: { type: Date, default: Date.now }
+});
+
+const scannedWebsiteSchema = new mongoose.Schema({
+  url: { type: String, required: true, unique: true },
+  name: { type: String },
+  isUp: { type: Boolean, default: true },
+  statusCode: { type: Number },
+  lastScannedAt: { type: Date, default: Date.now },
+  scanCount: { type: Number, default: 1 },
+  isFavorite: { type: Boolean, default: false }
 });
 
 const RealEmailAlertHistory = mongoose.model('RealEmailAlertHistory', emailAlertHistorySchema);
+const RealSearchHistory = mongoose.model('RealSearchHistory', searchHistorySchema);
+const RealScannedWebsite = mongoose.model('RealScannedWebsite', scannedWebsiteSchema);
+
 let inMemoryEmailHistory = [];
+let inMemorySearchHistory = [];
+let inMemoryScannedWebsites = [];
 
 const EmailAlertHistory = {
   create: async (data) => {
     if (isConnected()) return await RealEmailAlertHistory.create(data);
-    const doc = { ...data, _id: 'emailhist_' + Math.random().toString(36).substr(2, 9), sentAt: new Date() };
+    const doc = { ...data, _id: 'emailhist_' + Math.random().toString(36).substr(2, 9), sentAt: data.sentAt || new Date(), status: data.status || 'sending' };
     inMemoryEmailHistory.unshift(doc);
     return doc;
   },
@@ -375,6 +398,19 @@ const EmailAlertHistory = {
       }
     };
   },
+  findOneAndUpdate: async (query, updateData, options = {}) => {
+    if (isConnected()) return await RealEmailAlertHistory.findOneAndUpdate(query, updateData, options);
+    let index = inMemoryEmailHistory.findIndex(e => {
+      if (query._id && e._id !== query._id) return false;
+      if (query.messageId && e.messageId !== query.messageId) return false;
+      return true;
+    });
+    if (index !== -1) {
+      inMemoryEmailHistory[index] = { ...inMemoryEmailHistory[index], ...updateData };
+      return inMemoryEmailHistory[index];
+    }
+    return null;
+  },
   countDocuments: async (query = {}) => {
     if (isConnected()) return await RealEmailAlertHistory.countDocuments(query);
     let res = inMemoryEmailHistory;
@@ -383,10 +419,76 @@ const EmailAlertHistory = {
   }
 };
 
+const SearchHistory = {
+  create: async (data) => {
+    if (isConnected()) return await RealSearchHistory.create(data);
+    const doc = { ...data, _id: 'sh_' + Math.random().toString(36).substr(2, 9), searchedAt: new Date() };
+    inMemorySearchHistory.unshift(doc);
+    return doc;
+  },
+  find: (query = {}) => {
+    const isConn = isConnected();
+    return {
+      sort: (s) => ({
+        limit: async (lim) => {
+          if (isConn) return await RealSearchHistory.find(query).sort(s).limit(lim);
+          return inMemorySearchHistory.slice(0, lim);
+        }
+      }),
+      then: async (resolve) => {
+        if (isConn) return resolve(await RealSearchHistory.find(query));
+        return resolve(inMemorySearchHistory);
+      }
+    };
+  }
+};
+
+const ScannedWebsite = {
+  find: async (query = {}) => {
+    if (isConnected()) return await RealScannedWebsite.find(query);
+    return inMemoryScannedWebsites;
+  },
+  findOne: async (query = {}) => {
+    if (isConnected()) return await RealScannedWebsite.findOne(query);
+    return inMemoryScannedWebsites.find(w => w.url === query.url) || null;
+  },
+  findOneAndUpdate: async (query, updateData, options = {}) => {
+    if (isConnected()) return await RealScannedWebsite.findOneAndUpdate(query, updateData, options);
+    let index = inMemoryScannedWebsites.findIndex(w => w.url === query.url);
+    if (index !== -1) {
+      let updatedFields = { ...updateData };
+      if (updateData.$inc) {
+        const incFields = updateData.$inc;
+        for (const k of Object.keys(incFields)) {
+          updatedFields[k] = (inMemoryScannedWebsites[index][k] || 0) + incFields[k];
+        }
+        delete updatedFields.$inc;
+      }
+      inMemoryScannedWebsites[index] = { ...inMemoryScannedWebsites[index], ...updatedFields, lastScannedAt: new Date() };
+      return inMemoryScannedWebsites[index];
+    } else if (options.upsert) {
+      let initialFields = { ...updateData };
+      if (updateData.$inc) {
+        const incFields = updateData.$inc;
+        for (const k of Object.keys(incFields)) {
+          initialFields[k] = incFields[k];
+        }
+        delete initialFields.$inc;
+      }
+      const doc = { url: query.url, name: '', isUp: true, statusCode: 200, scanCount: 1, isFavorite: false, lastScannedAt: new Date(), _id: 'sw_' + Math.random().toString(36).substr(2, 9), ...initialFields };
+      inMemoryScannedWebsites.push(doc);
+      return doc;
+    }
+    return null;
+  }
+};
+
 module.exports = {
   MonitorHistory,
   WordPressMonitor,
   Alert,
   WebsiteEmailConfig,
-  EmailAlertHistory
+  EmailAlertHistory,
+  SearchHistory,
+  ScannedWebsite
 };

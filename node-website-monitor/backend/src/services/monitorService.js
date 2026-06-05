@@ -420,6 +420,40 @@ const checkWebsiteStatus = async (url) => {
     }
   } catch (e) {}
 
+  // Extract a friendly page title from SEO results or raw HTML markup
+  let pageTitle = '';
+  try {
+    pageTitle = seo?.title || seo?.metaTitle || htmlContent.match(/<title>([^<]+)<\/title>/i)?.[1] || '';
+    pageTitle = pageTitle.trim();
+  } catch (e) {}
+  
+  const getHostname = (urlStr) => {
+    try {
+      const withProtocol = urlStr.includes('://') ? urlStr : `https://${urlStr}`;
+      return new URL(withProtocol).hostname;
+    } catch (e) {
+      return urlStr;
+    }
+  };
+  const siteName = pageTitle || getHostname(url);
+
+  try {
+    const { ScannedWebsite } = require('../models/Schemas');
+    await ScannedWebsite.findOneAndUpdate(
+      { url },
+      {
+        name: siteName,
+        isUp: auditReport.isUp,
+        statusCode: auditReport.statusCode,
+        lastScannedAt: new Date(),
+        $inc: { scanCount: 1 }
+      },
+      { upsert: true, new: true }
+    );
+  } catch (err) {
+    console.error('⚠️ Failed to upsert ScannedWebsite in monitorService:', err.message);
+  }
+
   // Save full audit report log in history collection
   const log = await MonitorHistory.create(auditReport);
   return log;

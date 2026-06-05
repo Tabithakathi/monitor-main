@@ -113,26 +113,55 @@ const resolveAlert = async (req, res) => {
  * Retrieve all monitored targets and their latest status telemetry.
  */
 const getMonitoredTargets = async (req, res) => {
+  const getHostname = (urlStr) => {
+    try {
+      const withProtocol = urlStr.includes('://') ? urlStr : `https://${urlStr}`;
+      return new URL(withProtocol).hostname;
+    } catch (e) {
+      return urlStr;
+    }
+  };
+
   try {
-    const histories = await MonitorHistory.find({});
+    const { ScannedWebsite } = require('../models/Schemas');
+    let targets = await ScannedWebsite.find({});
     
-    // Group and pick the latest status check per unique website URL
-    const targetsMap = {};
-    for (const h of histories) {
-      const url = h.url;
-      const checkedAt = new Date(h.checkedAt);
-      if (!targetsMap[url] || new Date(targetsMap[url].checkedAt) < checkedAt) {
-        targetsMap[url] = {
-          url: h.url,
-          isUp: h.isUp,
-          statusCode: h.statusCode,
-          loadTimeMs: h.loadTimeMs,
-          checkedAt: h.checkedAt
-        };
+    // Fallback if ScannedWebsite is empty
+    if (!targets || targets.length === 0) {
+      const histories = await MonitorHistory.find({});
+      const targetsMap = {};
+      for (const h of histories) {
+        const url = h.url;
+        const checkedAt = new Date(h.checkedAt);
+        if (!targetsMap[url] || new Date(targetsMap[url].checkedAt) < checkedAt) {
+          targetsMap[url] = {
+            url: h.url,
+            name: getHostname(h.url),
+            isUp: h.isUp,
+            statusCode: h.statusCode,
+            loadTimeMs: h.loadTimeMs,
+            checkedAt: h.checkedAt,
+            lastScannedAt: h.checkedAt,
+            scanCount: 1,
+            isFavorite: false
+          };
+        }
       }
+      targets = Object.values(targetsMap);
+    } else {
+      // Map scanned websites to frontend schema format
+      targets = targets.map(t => ({
+        url: t.url,
+        name: t.name || getHostname(t.url),
+        isUp: t.isUp,
+        statusCode: t.statusCode,
+        checkedAt: t.lastScannedAt || new Date(),
+        lastScannedAt: t.lastScannedAt,
+        scanCount: t.scanCount || 1,
+        isFavorite: !!t.isFavorite
+      }));
     }
     
-    const targets = Object.values(targetsMap);
     res.status(200).json(targets);
   } catch (error) {
     res.status(500).json({ error: `Failed to compile monitored targets: ${error.message}` });

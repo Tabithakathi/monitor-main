@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import {
   Mail, Bell, BellOff, Send, CheckCircle2, AlertCircle,
   RefreshCw, Clock, Shield, Globe, Activity, ToggleLeft, ToggleRight,
@@ -78,6 +79,48 @@ export default function EmailAlertSettings({ siteUrl, showToast }) {
   useEffect(() => {
     fetchConfig();
     fetchHistory();
+  }, [siteUrl]);
+
+  useEffect(() => {
+    if (!siteUrl) return;
+    
+    const isLocalDev = typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const socketUrl = isLocalDev
+      ? 'http://localhost:5000'
+      : 'https://monitoring-main-main1.onrender.com';
+    const socket = io(socketUrl, {
+      transports: ['websocket', 'polling']
+    });
+
+    socket.on('emailStatusChanged', (updatedEmail) => {
+      // Normalize URLs
+      const normSite = siteUrl.replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+      const normEmailSite = updatedEmail.url.replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+      if (normSite !== normEmailSite) return;
+
+      setEmailHistory(prev => {
+        const exists = prev.some(item => item._id === updatedEmail._id);
+        if (exists) {
+          return prev.map(item => item._id === updatedEmail._id ? updatedEmail : item);
+        } else {
+          return [updatedEmail, ...prev];
+        }
+      });
+      
+      if (updatedEmail.status === 'delivered') {
+        setConfig(prev => ({
+          ...prev,
+          totalEmailsSent: (prev.totalEmailsSent || 0) + 1,
+          lastEmailSent: updatedEmail.deliveredAt || new Date(),
+          lastAlertType: updatedEmail.alertType
+        }));
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, [siteUrl]);
 
   const handleSave = async () => {
@@ -355,34 +398,105 @@ export default function EmailAlertSettings({ siteUrl, showToast }) {
                   <th className="py-2.5 px-3">Recipient</th>
                   <th className="py-2.5 px-3">Type</th>
                   <th className="py-2.5 px-3">Level</th>
-                  <th className="py-2.5 px-3 text-center">Delivered</th>
+                  <th className="py-2.5 px-3 text-center">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {emailHistory.map((entry, idx) => (
-                  <tr key={idx} className="border-b border-slate-800/40 hover:bg-slate-800/10 transition-all">
-                    <td className="py-2.5 px-3 text-slate-500 font-mono text-[9px]">
-                      {new Date(entry.sentAt).toLocaleString()}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-300 max-w-[200px] truncate" title={entry.subject}>
-                      {entry.subject}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-400 font-mono text-[9px]">{entry.alertEmail}</td>
-                    <td className="py-2.5 px-3">
-                      <span className="px-2 py-0.5 bg-slate-800 text-slate-400 rounded text-[8px] font-bold uppercase">{entry.alertType}</span>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${LEVEL_COLORS[entry.level] || LEVEL_COLORS.info}`}>
-                        {entry.level?.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      {entry.delivered
-                        ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 mx-auto" />
-                        : <AlertCircle  className="h-3.5 w-3.5 text-slate-600 mx-auto" />}
-                    </td>
-                  </tr>
-                ))}
+                {emailHistory.map((entry, idx) => {
+                  let effectiveStatus = entry.status;
+                  if (!effectiveStatus) {
+                    effectiveStatus = entry.delivered ? 'delivered' : 'failed';
+                  }
+
+                  const getStatusBadge = (status) => {
+                    switch (status) {
+                      case 'delivered':
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-450 border border-emerald-500/20 text-[9px] font-black uppercase tracking-wider">
+                            ✅ Delivered
+                          </span>
+                        );
+                      case 'sending':
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] font-black uppercase tracking-wider animate-pulse">
+                            ⏳ Sending
+                          </span>
+                        );
+                      case 'failed':
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-500/10 text-rose-450 border border-rose-500/20 text-[9px] font-black uppercase tracking-wider">
+                            ❌ Failed
+                          </span>
+                        );
+                      case 'bounced':
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20 text-[9px] font-black uppercase tracking-wider">
+                            ⚠️ Bounced
+                          </span>
+                        );
+                      default:
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-500/10 text-slate-400 border border-slate-500/20 text-[9px] font-black uppercase tracking-wider">
+                            ❔ Unknown
+                          </span>
+                        );
+                    }
+                  };
+
+                  const getStatusColorText = (status) => {
+                    switch (status) {
+                      case 'delivered': return 'text-emerald-400';
+                      case 'sending': return 'text-amber-400';
+                      case 'failed': return 'text-rose-400';
+                      case 'bounced': return 'text-orange-400';
+                      default: return 'text-slate-400';
+                    }
+                  };
+
+                  return (
+                    <tr key={idx} className="border-b border-slate-800/40 hover:bg-slate-850/30 transition-all">
+                      <td className="py-2.5 px-3 text-slate-500 font-mono text-[9px]">
+                        {new Date(entry.sentAt).toLocaleString()}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-350 max-w-[200px] truncate" title={entry.subject}>
+                        {entry.subject}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-400 font-mono text-[9px]">{entry.alertEmail}</td>
+                      <td className="py-2.5 px-3">
+                        <span className="px-2 py-0.5 bg-slate-800 text-slate-450 rounded text-[8px] font-bold uppercase">{entry.alertType}</span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${LEVEL_COLORS[entry.level] || LEVEL_COLORS.info}`}>
+                          {entry.level?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center relative group select-none">
+                        <div className="cursor-help inline-block">
+                          {getStatusBadge(effectiveStatus)}
+                        </div>
+                        {/* Hover Tooltip */}
+                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 bg-slate-950 border border-slate-800/80 text-slate-300 text-[10px] rounded-xl p-3 shadow-2xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 z-50 text-left leading-normal">
+                          <div className="font-extrabold text-[9px] uppercase tracking-wider text-slate-400 border-b border-slate-850 pb-1.5 mb-2 flex justify-between">
+                            <span>Delivery Details</span>
+                            <span className={getStatusColorText(effectiveStatus)}>{effectiveStatus?.toUpperCase()}</span>
+                          </div>
+                          <div className="space-y-1.5 font-sans">
+                            <div><span className="font-bold text-slate-500">Sent:</span> {new Date(entry.sentAt).toLocaleString()}</div>
+                            <div><span className="font-bold text-slate-500">Delivered:</span> {entry.deliveredAt ? new Date(entry.deliveredAt).toLocaleString() : '—'}</div>
+                            {entry.messageId && (
+                              <div className="truncate"><span className="font-bold text-slate-500">Msg ID:</span> <span className="font-mono text-[9px] text-slate-400">{entry.messageId}</span></div>
+                            )}
+                            {entry.errorReason && (
+                              <div className="text-rose-400 mt-1.5 border-t border-slate-850 pt-1.5 leading-relaxed">
+                                <span className="font-bold text-rose-350">Reason:</span> {entry.errorReason}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
