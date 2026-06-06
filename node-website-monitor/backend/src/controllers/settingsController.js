@@ -174,14 +174,16 @@ const testEmail = async (req, res) => {
           service: 'gmail',
           auth: { user: hostUser, pass: hostPass },
           connectionTimeout: 10000,
-          greetingTimeout: 10000
+          greetingTimeout: 10000,
+          socketTimeout: 10000
         } : {
           host: process.env.EMAIL_HOST || 'localhost',
           port: parseInt(process.env.EMAIL_PORT) || 25,
           secure: process.env.EMAIL_USE_SSL === 'true',
           auth: { user: hostUser, pass: hostPass },
           connectionTimeout: 10000,
-          greetingTimeout: 10000
+          greetingTimeout: 10000,
+          socketTimeout: 10000
         }
       );
 

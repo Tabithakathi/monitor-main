@@ -398,6 +398,15 @@ const EmailAlertHistory = {
       }
     };
   },
+  findOne: async (query = {}) => {
+    if (isConnected()) return await RealEmailAlertHistory.findOne(query);
+    return inMemoryEmailHistory.find(e => {
+      if (query._id && e._id !== query._id) return false;
+      if (query.url && e.url !== query.url) return false;
+      if (query.messageId && e.messageId !== query.messageId) return false;
+      return true;
+    }) || null;
+  },
   findOneAndUpdate: async (query, updateData, options = {}) => {
     if (isConnected()) return await RealEmailAlertHistory.findOneAndUpdate(query, updateData, options);
     let index = inMemoryEmailHistory.findIndex(e => {

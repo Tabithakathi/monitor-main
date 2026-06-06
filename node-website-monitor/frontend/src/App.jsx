@@ -13,6 +13,7 @@ import AdminDashboard from './components/AdminDashboard';
 import EmailAlertSettings from './components/EmailAlertSettings';
 import MalwareReport from './components/MalwareReport';
 import ImageOptimization from './components/ImageOptimization';
+import ImageOptimizationAnalyzer from './components/ImageOptimizationAnalyzer';
 import AdminLogin from './components/AdminLogin';
 
 
@@ -406,7 +407,7 @@ export default function App() {
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
     const socketUrl = isLocalDev
       ? 'http://localhost:5000'
-      : 'https://monitoring-main-main1.onrender.com';
+      : 'https://monitor-hg6i.onrender.com';
     const socket = io(socketUrl, {
       transports: ['websocket', 'polling']
     });
@@ -716,6 +717,7 @@ export default function App() {
             { id: 'seo',           label: 'SEO Optimization' },
             { id: 'accessibility', label: 'Accessibility' },
             { id: 'site_analysis', label: 'Site Analysis' },
+            { id: 'image_analyzer', label: 'Image Optimization Analyzer' },
             { id: 'email_alerts',  label: 'Email Alerts' },
             { id: 'settings',      label: 'Gmail & Alerts' },
           ].map(tab => (
@@ -793,6 +795,14 @@ export default function App() {
                 crawlData={crawlData}
                 crawlLoading={crawlLoading}
                 altHighlight={siteAnalysisAltHighlight}
+              />
+            )}
+            {activeTab === 'image_analyzer' && (
+              <ImageOptimizationAnalyzer
+                stats={stats}
+                crawlData={crawlData}
+                url={url}
+                isDark={isDark}
               />
             )}
             {activeTab === 'malware' && (

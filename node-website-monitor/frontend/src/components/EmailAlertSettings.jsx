@@ -88,7 +88,7 @@ export default function EmailAlertSettings({ siteUrl, showToast }) {
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
     const socketUrl = isLocalDev
       ? 'http://localhost:5000'
-      : 'https://monitoring-main-main1.onrender.com';
+      : 'https://monitor-hg6i.onrender.com';
     const socket = io(socketUrl, {
       transports: ['websocket', 'polling']
     });

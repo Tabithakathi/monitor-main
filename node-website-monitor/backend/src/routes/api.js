@@ -105,7 +105,7 @@ router.post('/test-site-email', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL required.' });
   try {
-    const { WebsiteEmailConfig } = require('../models/Schemas');
+    const { WebsiteEmailConfig, EmailAlertHistory } = require('../models/Schemas');
     const { enqueueEmailAlert } = require('../services/emailService');
 
     const config = await WebsiteEmailConfig.findOne({ url });
@@ -140,7 +140,7 @@ router.post('/test-site-email', async (req, res) => {
     </body></html>`;
 
     // Enqueue the email alert in the background queue
-    await enqueueEmailAlert({
+    const doc = await enqueueEmailAlert({
       url,
       recipient,
       category: 'test',
@@ -150,9 +150,25 @@ router.post('/test-site-email', async (req, res) => {
       html
     });
 
+    // Await delivery status resolution (up to 15 seconds)
+    let finalDoc = doc;
+    const startTime = Date.now();
+    while (finalDoc && finalDoc.status === 'sending' && (Date.now() - startTime < 15000)) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      finalDoc = await EmailAlertHistory.findOne({ _id: doc._id });
+    }
+
+    if (!finalDoc || finalDoc.status === 'failed') {
+      const errorMsg = finalDoc?.errorReason || 'Email delivery failed (check SMTP settings).';
+      return res.status(500).json({
+        success: false,
+        error: errorMsg
+      });
+    }
+
     res.status(200).json({
       success: true,
-      message: `✅ Test email successfully queued for ${recipient}`
+      message: `✅ Test email successfully delivered to ${recipient}`
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
