@@ -235,6 +235,7 @@ const fetchSingleImageMetadata = async (imageUrl) => {
 
   let contentLength = null;
   let actualFileSize = null;
+  let format = null;
 
   try {
     // 1. Try HEAD request
@@ -249,8 +250,15 @@ const fetchSingleImageMetadata = async (imageUrl) => {
     });
 
     if (headResponse.status === 200) {
-      const contentType = headResponse.headers['content-type'] || '';
+      const contentType = (headResponse.headers['content-type'] || '').toLowerCase();
       if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
+        if (contentType.includes('image/png')) format = 'png';
+        else if (contentType.includes('image/jpeg') || contentType.includes('image/jpg')) format = 'jpg';
+        else if (contentType.includes('image/gif')) format = 'gif';
+        else if (contentType.includes('image/webp')) format = 'webp';
+        else if (contentType.includes('image/svg') || contentType.includes('image/svg+xml')) format = 'svg';
+        else if (contentType.includes('image/avif')) format = 'avif';
+
         const cl = headResponse.headers['content-length'];
         if (cl) {
           const parsedLen = parseInt(cl, 10);
@@ -280,8 +288,15 @@ const fetchSingleImageMetadata = async (imageUrl) => {
       });
 
       if (getResponse.status === 200) {
-        const contentType = getResponse.headers['content-type'] || '';
+        const contentType = (getResponse.headers['content-type'] || '').toLowerCase();
         if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
+          if (contentType.includes('image/png')) format = 'png';
+          else if (contentType.includes('image/jpeg') || contentType.includes('image/jpg')) format = 'jpg';
+          else if (contentType.includes('image/gif')) format = 'gif';
+          else if (contentType.includes('image/webp')) format = 'webp';
+          else if (contentType.includes('image/svg') || contentType.includes('image/svg+xml')) format = 'svg';
+          else if (contentType.includes('image/avif')) format = 'avif';
+
           const cl = getResponse.headers['content-length'];
           if (cl) {
             const parsedLen = parseInt(cl, 10);
@@ -296,13 +311,34 @@ const fetchSingleImageMetadata = async (imageUrl) => {
         }
       }
     } catch (err) {
+      const parts = imageUrl.split('?')[0].split('/');
+      const filename = parts.pop() || '';
+      const ext = filename.split('.').pop()?.toLowerCase();
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) {
+        format = ext === 'jpeg' ? 'jpg' : ext;
+      } else {
+        format = 'png';
+      }
+
       return {
         imageUrl,
         contentLength,
         actualFileSize: 0,
+        format,
         success: false,
         error: err.message
       };
+    }
+  }
+
+  if (!format) {
+    const parts = imageUrl.split('?')[0].split('/');
+    const filename = parts.pop() || '';
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) {
+      format = ext === 'jpeg' ? 'jpg' : ext;
+    } else {
+      format = 'png';
     }
   }
 
@@ -310,6 +346,7 @@ const fetchSingleImageMetadata = async (imageUrl) => {
     imageUrl,
     contentLength,
     actualFileSize: actualFileSize || 0,
+    format,
     success: actualFileSize !== null
   };
 };

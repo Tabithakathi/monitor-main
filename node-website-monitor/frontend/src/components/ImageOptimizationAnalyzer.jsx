@@ -161,6 +161,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
             map[res.imageUrl] = {
               contentLength: res.contentLength,
               actualFileSize: res.actualFileSize,
+              format: res.format,
               success: res.success
             };
           });
@@ -237,22 +238,45 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
       const name = getFileName(img.src);
       const ext = name.split('.').pop()?.toLowerCase() || 'png';
 
-      // Look up real sizes
+      // Look up real sizes and backend-detected format
       const sizeInfo = imageSizesMap[img.src];
       const originalSize = sizeInfo ? sizeInfo.actualFileSize : 0;
+      const detectedFormat = sizeInfo?.format || ext;
 
-      // Format-Specific Compression Estimate
-      const getCompressionEstimate = (formatExt) => {
-        const format = formatExt?.toLowerCase();
-        if (format === 'png') return 75; // 75% saving
-        if (format === 'jpg' || format === 'jpeg') return 70; // 70% saving
-        if (format === 'gif') return 85; // 85% saving
-        if (format === 'webp' || format === 'avif') return 5; // 5% saving
-        if (format === 'svg') return 0; // 0% saving
-        return 10; // default 10% saving for other formats
+      // Format and size dependent compression estimate (TinyPNG simulation)
+      const getCompressionEstimate = (formatName, size) => {
+        const fmt = formatName?.toLowerCase();
+        
+        // 1. PNG: 40% to 80% reduction
+        if (fmt === 'png') {
+          return 40 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+        }
+        
+        // 2. JPEG / JPG: 20% to 60% reduction
+        if (fmt === 'jpg' || fmt === 'jpeg') {
+          return 20 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+        }
+        
+        // 3. GIF: 30% to 70% reduction
+        if (fmt === 'gif') {
+          return 30 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+        }
+        
+        // 4. WebP / AVIF: 0% to 15% reduction
+        if (fmt === 'webp' || fmt === 'avif') {
+          return Math.min(15, Math.round((size / (1024 * 1024)) * 15));
+        }
+        
+        // 5. SVG: 0% to 20% reduction
+        if (fmt === 'svg') {
+          return Math.min(20, Math.round((size / (200 * 1024)) * 20));
+        }
+        
+        // Default: 10% to 30% reduction
+        return 10 + Math.min(20, Math.round((size / (1024 * 1024)) * 20));
       };
 
-      const compressionEstimateVal = getCompressionEstimate(ext);
+      const compressionEstimateVal = getCompressionEstimate(detectedFormat, originalSize);
 
       // Determine optimized size and savings percentage based on actual size
       let optimizedSize = Math.round(originalSize * (1 - compressionEstimateVal / 100));
@@ -290,9 +314,9 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
       // Generate recommendation checklists
       const recs = [];
-      if (ext === 'png') recs.push('Convert PNG to WebP');
-      if (ext === 'jpg' || ext === 'jpeg') recs.push('Compress JPEG');
-      if (ext === 'gif') recs.push('Replace animated GIF with WebP/video');
+      if (detectedFormat === 'png') recs.push('Convert PNG to WebP');
+      if (detectedFormat === 'jpg' || detectedFormat === 'jpeg') recs.push('Compress JPEG');
+      if (detectedFormat === 'gif') recs.push('Replace animated GIF with WebP/video');
       if (originalSize > 800 * 1024) recs.push('Resize oversized images');
       if (!img.isLazy) recs.push('Enable Lazy Loading');
       recs.push('Add Width and Height attributes');
@@ -301,7 +325,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
       return {
         ...img,
         name,
-        ext: ext.toUpperCase(),
+        ext: detectedFormat.toUpperCase(),
         originalSize,
         optimizedSize,
         potentialSaving,
