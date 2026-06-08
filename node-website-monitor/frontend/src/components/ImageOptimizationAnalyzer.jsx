@@ -162,7 +162,10 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
               contentLength: res.contentLength,
               actualFileSize: res.actualFileSize,
               format: res.format,
-              success: res.success
+              success: res.success,
+              isValid: res.isValid,
+              httpStatus: res.httpStatus,
+              errorReason: res.errorReason
             };
           });
           setImageSizesMap(map);
@@ -240,87 +243,101 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
       // Look up real sizes and backend-detected format
       const sizeInfo = imageSizesMap[img.src];
-      const originalSize = sizeInfo ? sizeInfo.actualFileSize : 0;
-      const detectedFormat = sizeInfo?.format || ext;
+      const isBroken = sizeInfo ? !sizeInfo.isValid : false;
+      const brokenReason = sizeInfo ? sizeInfo.errorReason : null;
 
-      // Format and size dependent compression estimate (TinyPNG simulation)
-      const getCompressionEstimate = (formatName, size) => {
-        const fmt = formatName?.toLowerCase();
-        
-        // 1. PNG: 40% to 80% reduction
-        if (fmt === 'png') {
-          return 40 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
-        }
-        
-        // 2. JPEG / JPG: 20% to 60% reduction
-        if (fmt === 'jpg' || fmt === 'jpeg') {
-          return 20 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
-        }
-        
-        // 3. GIF: 30% to 70% reduction
-        if (fmt === 'gif') {
-          return 30 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
-        }
-        
-        // 4. WebP / AVIF: 0% to 15% reduction
-        if (fmt === 'webp' || fmt === 'avif') {
-          return Math.min(15, Math.round((size / (1024 * 1024)) * 15));
-        }
-        
-        // 5. SVG: 0% to 20% reduction
-        if (fmt === 'svg') {
-          return Math.min(20, Math.round((size / (200 * 1024)) * 20));
-        }
-        
-        // Default: 10% to 30% reduction
-        return 10 + Math.min(20, Math.round((size / (1024 * 1024)) * 20));
-      };
+      const originalSize = (sizeInfo && sizeInfo.isValid) ? sizeInfo.actualFileSize : 0;
+      const detectedFormat = (sizeInfo && sizeInfo.isValid) ? (sizeInfo.format || ext) : ext;
 
-      const compressionEstimateVal = getCompressionEstimate(detectedFormat, originalSize);
+      let compressionEstimateVal = 0;
+      let optimizedSize = 0;
+      let potentialSaving = 0;
+      let savingsPct = 0;
 
-      // Determine optimized size and savings percentage based on actual size
-      let optimizedSize = Math.round(originalSize * (1 - compressionEstimateVal / 100));
+      if (!isBroken) {
+        // Format and size dependent compression estimate (TinyPNG simulation)
+        const getCompressionEstimate = (formatName, size) => {
+          const fmt = formatName?.toLowerCase();
+          
+          // 1. PNG: 40% to 80% reduction
+          if (fmt === 'png') {
+            return 40 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+          }
+          
+          // 2. JPEG / JPG: 20% to 60% reduction
+          if (fmt === 'jpg' || fmt === 'jpeg') {
+            return 20 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+          }
+          
+          // 3. GIF: 30% to 70% reduction
+          if (fmt === 'gif') {
+            return 30 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+          }
+          
+          // 4. WebP / AVIF: 0% to 15% reduction
+          if (fmt === 'webp' || fmt === 'avif') {
+            return Math.min(15, Math.round((size / (1024 * 1024)) * 15));
+          }
+          
+          // 5. SVG: 0% to 20% reduction
+          if (fmt === 'svg') {
+            return Math.min(20, Math.round((size / (200 * 1024)) * 20));
+          }
+          
+          // Default: 10% to 30% reduction
+          return 10 + Math.min(20, Math.round((size / (1024 * 1024)) * 20));
+        };
 
-      // Validation Rules
-      if (optimizedSize > originalSize) {
-        optimizedSize = originalSize;
+        compressionEstimateVal = getCompressionEstimate(detectedFormat, originalSize);
+
+        // Determine optimized size and savings percentage based on actual size
+        optimizedSize = Math.round(originalSize * (1 - compressionEstimateVal / 100));
+
+        // Validation Rules
+        if (optimizedSize > originalSize) {
+          optimizedSize = originalSize;
+        }
+        if (optimizedSize < 0) {
+          optimizedSize = 0;
+        }
+
+        potentialSaving = originalSize - optimizedSize;
+        if (potentialSaving > originalSize) {
+          potentialSaving = originalSize;
+        }
+        if (potentialSaving < 0) {
+          potentialSaving = 0;
+        }
+
+        savingsPct = originalSize > 0 
+          ? Math.round((potentialSaving / originalSize) * 100) 
+          : 0;
+
+        if (savingsPct < 0) savingsPct = 0;
+        if (savingsPct > 100) savingsPct = 100;
       }
-      if (optimizedSize < 0) {
-        optimizedSize = 0;
-      }
-
-      let potentialSaving = originalSize - optimizedSize;
-      if (potentialSaving > originalSize) {
-        potentialSaving = originalSize;
-      }
-      if (potentialSaving < 0) {
-        potentialSaving = 0;
-      }
-
-      let savingsPct = originalSize > 0 
-        ? Math.round((potentialSaving / originalSize) * 100) 
-        : 0;
-
-      if (savingsPct < 0) savingsPct = 0;
-      if (savingsPct > 100) savingsPct = 100;
 
       // Determine severity
       let severity = 'green';
-      if (potentialSaving > 400 * 1024 || (originalSize > 500 * 1024 && savingsPct > 50)) {
-        severity = 'red';
-      } else if (potentialSaving > 80 * 1024 || savingsPct > 15) {
-        severity = 'yellow';
+      if (!isBroken) {
+        if (potentialSaving > 400 * 1024 || (originalSize > 500 * 1024 && savingsPct > 50)) {
+          severity = 'red';
+        } else if (potentialSaving > 80 * 1024 || savingsPct > 15) {
+          severity = 'yellow';
+        }
       }
 
       // Generate recommendation checklists
       const recs = [];
-      if (detectedFormat === 'png') recs.push('Convert PNG to WebP');
-      if (detectedFormat === 'jpg' || detectedFormat === 'jpeg') recs.push('Compress JPEG');
-      if (detectedFormat === 'gif') recs.push('Replace animated GIF with WebP/video');
-      if (originalSize > 800 * 1024) recs.push('Resize oversized images');
-      if (!img.isLazy) recs.push('Enable Lazy Loading');
-      recs.push('Add Width and Height attributes');
-      if (originalSize > 300 * 1024) recs.push('Serve responsive images');
+      if (!isBroken) {
+        if (detectedFormat === 'png') recs.push('Convert PNG to WebP');
+        if (detectedFormat === 'jpg' || detectedFormat === 'jpeg') recs.push('Compress JPEG');
+        if (detectedFormat === 'gif') recs.push('Replace animated GIF with WebP/video');
+        if (originalSize > 800 * 1024) recs.push('Resize oversized images');
+        if (!img.isLazy) recs.push('Enable Lazy Loading');
+        recs.push('Add Width and Height attributes');
+        if (originalSize > 300 * 1024) recs.push('Serve responsive images');
+      }
 
       return {
         ...img,
@@ -332,6 +349,8 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
         savingsPct,
         severity,
         recs,
+        isBroken,
+        brokenReason,
         // Debug information
         imageUrl: img.src,
         contentLength: sizeInfo ? sizeInfo.contentLength : null,
@@ -348,8 +367,10 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     let totalOptimized = 0;
     
     images.forEach(img => {
-      totalOriginal += img.originalSize;
-      totalOptimized += img.optimizedSize;
+      if (!img.isBroken) {
+        totalOriginal += img.originalSize;
+        totalOptimized += img.optimizedSize;
+      }
     });
 
     const totalSavings = totalOriginal - totalOptimized;
@@ -410,11 +431,13 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     let over1M = 0;
 
     images.forEach(img => {
-      const sizeKB = img.originalSize / 1024;
-      if (sizeKB < 100) under100++;
-      else if (sizeKB < 500) between100And500++;
-      else if (sizeKB < 1024) between500And1M++;
-      else over1M++;
+      if (!img.isBroken) {
+        const sizeKB = img.originalSize / 1024;
+        if (sizeKB < 100) under100++;
+        else if (sizeKB < 500) between100And500++;
+        else if (sizeKB < 1024) between500And1M++;
+        else over1M++;
+      }
     });
 
     return [
@@ -435,9 +458,11 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
   const formatDistributionData = useMemo(() => {
     const counts = {};
     images.forEach(img => {
-      let format = img.ext;
-      if (format === 'JPEG') format = 'JPG';
-      counts[format] = (counts[format] || 0) + 1;
+      if (!img.isBroken) {
+        let format = img.ext;
+        if (format === 'JPEG') format = 'JPG';
+        counts[format] = (counts[format] || 0) + 1;
+      }
     });
 
     return Object.keys(counts).map(key => ({
@@ -471,9 +496,11 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     let resize = 0;
     let lazy = 0;
     let responsive = 0;
-    let dimensions = images.length; // all need proper tags by default
+    let dimensions = 0;
 
     images.forEach(img => {
+      if (img.isBroken) return;
+      dimensions++;
       if (img.ext === 'PNG') pngToWebp++;
       if (img.ext === 'JPG' || img.ext === 'JPEG') jpegCompress++;
       if (img.originalSize > 800 * 1024) resize++;
@@ -867,6 +894,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       <span className="flex h-2.5 w-2.5 relative">
                         <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                          img.isBroken ? 'bg-slate-500' :
                           img.severity === 'red' ? 'bg-rose-500' : 
                           img.severity === 'yellow' ? 'bg-amber-500' : 'bg-emerald-500'
                         }`}></span>
@@ -878,6 +906,11 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                       <div className="font-bold text-slate-200 group-hover:text-indigo-400 transition-colors truncate">
                         {img.name}
                       </div>
+                      {img.isBroken && (
+                        <div className="text-[10px] text-rose-400 font-bold mt-0.5 flex items-center gap-1">
+                          <span>⚠️ Broken Image: {img.brokenReason || 'Invalid URL'}</span>
+                        </div>
+                      )}
                       <div className="text-[10px] text-slate-500 font-mono truncate mt-0.5">
                         {img.src}
                       </div>
@@ -889,17 +922,19 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
                     {/* Original Size */}
                     <td className="py-3.5 px-4 font-mono font-bold text-slate-350 whitespace-nowrap">
-                      {formatBytes(img.originalSize)}
+                      {img.isBroken ? '—' : formatBytes(img.originalSize)}
                     </td>
 
                     {/* Optimized Size */}
                     <td className="py-3.5 px-4 font-mono font-bold text-emerald-400/90 whitespace-nowrap">
-                      {formatBytes(img.optimizedSize)}
+                      {img.isBroken ? '—' : formatBytes(img.optimizedSize)}
                     </td>
 
                     {/* Potential Savings */}
                     <td className="py-3.5 px-4 font-mono font-bold whitespace-nowrap">
-                      {img.potentialSaving > 0 ? (
+                      {img.isBroken ? (
+                        <span className="text-slate-500">—</span>
+                      ) : img.potentialSaving > 0 ? (
                         <span className={img.severity === 'red' ? 'text-rose-400' : img.severity === 'yellow' ? 'text-amber-400' : 'text-slate-500'}>
                           {formatBytes(img.potentialSaving)}
                         </span>
@@ -910,7 +945,9 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
                     {/* Savings Percentage */}
                     <td className="py-3.5 px-4 text-right font-mono font-black whitespace-nowrap">
-                      {img.savingsPct > 0 ? (
+                      {img.isBroken ? (
+                        <span className="text-slate-500">—</span>
+                      ) : img.savingsPct > 0 ? (
                         <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
                           img.severity === 'red' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
                           img.severity === 'yellow' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
@@ -948,17 +985,18 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
             <div className="md:w-1/2 bg-slate-950/30 p-8 border-b md:border-b-0 md:border-r border-slate-800/60 flex flex-col justify-center items-center relative">
               <div className="absolute top-4 left-4">
                 <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${
+                  selectedImage.isBroken ? 'bg-slate-500/10 text-slate-400 border-slate-500/20' :
                   selectedImage.severity === 'red' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 
                   selectedImage.severity === 'yellow' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
                   'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                 }`}>
-                  {selectedImage.severity === 'red' ? 'Highly Unoptimized' : selectedImage.severity === 'yellow' ? 'Needs Improvement' : 'Optimized'}
+                  {selectedImage.isBroken ? `Broken Image: ${selectedImage.brokenReason || 'Invalid URL'}` : selectedImage.severity === 'red' ? 'Highly Unoptimized' : selectedImage.severity === 'yellow' ? 'Needs Improvement' : 'Optimized'}
                 </span>
               </div>
 
               {/* Actual Image preview */}
               <div className="w-full max-h-60 flex items-center justify-center overflow-hidden rounded-xl border border-slate-800/40 p-4 bg-slate-900/40 shadow-inner mt-4">
-                {!previewError && (
+                {!selectedImage.isBroken && !previewError && (
                   <img 
                     src={selectedImage.src} 
                     alt={selectedImage.name} 
@@ -976,17 +1014,17 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                 )}
                 
                 {/* Fallback Display */}
-                {previewError && (
+                {(selectedImage.isBroken || previewError) && (
                   <div 
                     id="preview-fallback-box" 
                     className="flex flex-col items-center justify-center py-12 text-slate-600 gap-3"
                   >
-                    <ImageIcon className="h-12 w-12 text-slate-700 animate-pulse" />
+                    <ImageIcon className="h-12 w-12 text-slate-750 animate-pulse" />
                     <span className="text-[10px] text-slate-500 font-mono text-center truncate max-w-[200px]" title={selectedImage.src}>
                       {selectedImage.name}
                     </span>
                     <span className="text-[10px] text-rose-500 font-semibold uppercase tracking-wider">
-                      Preview unavailable
+                      {selectedImage.isBroken ? `Broken (${selectedImage.brokenReason})` : 'Preview unavailable'}
                     </span>
                   </div>
                 )}
@@ -994,10 +1032,10 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
               
               <div className="mt-4 w-full flex items-center justify-between text-[10px] text-slate-500">
                 <span className="font-mono">Format: <strong className="text-slate-350">{selectedImage.ext}</strong></span>
-                {previewDimensions && (
+                {!selectedImage.isBroken && previewDimensions && (
                   <span className="font-mono">Dimensions: <strong className="text-indigo-400">{previewDimensions.width} × {previewDimensions.height} px</strong></span>
                 )}
-                <span className="font-mono">Savings: <strong className="text-emerald-400">-{selectedImage.savingsPct}%</strong></span>
+                <span className="font-mono">Savings: <strong className="text-emerald-400">{selectedImage.isBroken ? '—' : `-${selectedImage.savingsPct}%`}</strong></span>
               </div>
             </div>
 
@@ -1010,104 +1048,122 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                   <h4 className="text-base font-black text-slate-200 pr-8 truncate" title={selectedImage.name}>
                     {selectedImage.name}
                   </h4>
-                  <a 
-                    href={selectedImage.src} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-[10px] text-indigo-400 hover:text-indigo-300 hover:underline mt-1 inline-flex items-center gap-1 truncate max-w-full"
-                  >
-                    <span>Open Image URL</span>
-                    <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                  </a>
+                  {selectedImage.isBroken ? (
+                    <div className="text-[10px] text-rose-405 font-bold mt-1">
+                      ⚠️ Broken Image: {selectedImage.brokenReason || 'Invalid URL'}
+                    </div>
+                  ) : (
+                    <a 
+                      href={selectedImage.src} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-indigo-400 hover:text-indigo-300 hover:underline mt-1 inline-flex items-center gap-1 truncate max-w-full"
+                    >
+                      <span>Open Image URL</span>
+                      <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                    </a>
+                  )}
                 </div>
 
                 {/* Savings Metrics Info */}
                 <div className="grid grid-cols-3 gap-3 p-3 bg-dark-900/10 border border-slate-800/40 rounded-xl text-center">
                   <div className="text-left border-r border-slate-800/80 pr-2">
                     <span className="text-[9px] text-slate-500 font-bold uppercase block">Original Size</span>
-                    <span className="text-xs font-black text-rose-455 font-mono">{formatBytes(selectedImage.originalSize)}</span>
+                    <span className="text-xs font-black text-rose-455 font-mono">{selectedImage.isBroken ? '—' : formatBytes(selectedImage.originalSize)}</span>
                   </div>
                   <div className="text-left border-r border-slate-800/80 px-2">
                     <span className="text-[9px] text-slate-550 font-bold uppercase block">Recommended</span>
-                    <span className="text-xs font-black text-emerald-400 font-mono">{formatBytes(selectedImage.optimizedSize)}</span>
+                    <span className="text-xs font-black text-emerald-400 font-mono">{selectedImage.isBroken ? '—' : formatBytes(selectedImage.optimizedSize)}</span>
                   </div>
                   <div className="text-left pl-2">
                     <span className="text-[9px] text-indigo-450 font-bold uppercase block">Potential Saving</span>
                     <span className="text-xs font-black text-indigo-400 font-mono">
-                      {selectedImage.potentialSaving > 0 ? formatBytes(selectedImage.potentialSaving) : '0 KB'}
+                      {selectedImage.isBroken ? '—' : selectedImage.potentialSaving > 0 ? formatBytes(selectedImage.potentialSaving) : '0 KB'}
                     </span>
                   </div>
                 </div>
 
                 {/* Checklist Recommendations details */}
-                <div className="space-y-2.5">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Optimization Checklist</span>
-                  
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {[
-                      { 
-                        title: 'Convert PNG to WebP', 
-                        applies: selectedImage.ext === 'PNG', 
-                        desc: 'Converts uncompressed PNG channels to highly efficient lossy WebP' 
-                      },
-                      { 
-                        title: 'Compress JPEG', 
-                        applies: selectedImage.ext === 'JPG' || selectedImage.ext === 'JPEG', 
-                        desc: 'Reduces visual noise and metadata fields for smaller payloads' 
-                      },
-                      { 
-                        title: 'Replace animated GIF with WebP/video', 
-                        applies: selectedImage.ext === 'GIF', 
-                        desc: 'Converts legacy GIF animation loops to modern WebP frames or HTML5 loops' 
-                      },
-                      { 
-                        title: 'Resize oversized images', 
-                        applies: selectedImage.originalSize > 800 * 1024, 
-                        desc: 'Downscales resolution to fit exact CSS boundaries' 
-                      },
-                      { 
-                        title: 'Enable Lazy Loading', 
-                        applies: !selectedImage.isLazy, 
-                        desc: 'Defers download of off-screen/below-fold images' 
-                      },
-                      { 
-                        title: 'Add Width and Height attributes', 
-                        applies: true, // recommendations for all by default
-                        desc: 'Prevents Cumulative Layout Shift (CLS) on content render' 
-                      },
-                      { 
-                        title: 'Serve responsive images', 
-                        applies: selectedImage.originalSize > 300 * 1024, 
-                        desc: 'Uses srcset/sizes queries to scale resolution down on mobile devices' 
-                      }
-                    ].map((rec, idx) => (
-                      <div key={idx} className="flex items-start gap-2.5 p-2 bg-dark-800/10 border border-slate-800/30 rounded-lg">
-                        <div className="mt-0.5 shrink-0">
-                          {rec.applies ? (
-                            <span className="flex h-3.5 w-3.5 bg-rose-500/10 rounded-full items-center justify-center text-[9px] text-rose-455 font-bold font-mono">
-                              !
-                            </span>
-                          ) : (
-                            <span className="flex h-3.5 w-3.5 bg-emerald-500/10 rounded-full items-center justify-center text-[9px] text-emerald-450 font-mono">
-                              ✓
-                            </span>
-                          )}
+                {!selectedImage.isBroken ? (
+                  <div className="space-y-2.5">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Optimization Checklist</span>
+                    
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {[
+                        { 
+                          title: 'Convert PNG to WebP', 
+                          applies: selectedImage.ext === 'PNG', 
+                          desc: 'Converts uncompressed PNG channels to highly efficient lossy WebP' 
+                        },
+                        { 
+                          title: 'Compress JPEG', 
+                          applies: selectedImage.ext === 'JPG' || selectedImage.ext === 'JPEG', 
+                          desc: 'Reduces visual noise and metadata fields for smaller payloads' 
+                        },
+                        { 
+                          title: 'Replace animated GIF with WebP/video', 
+                          applies: selectedImage.ext === 'GIF', 
+                          desc: 'Converts legacy GIF animation loops to modern WebP frames or HTML5 loops' 
+                        },
+                        { 
+                          title: 'Resize oversized images', 
+                          applies: selectedImage.originalSize > 800 * 1024, 
+                          desc: 'Downscales resolution to fit exact CSS boundaries' 
+                        },
+                        { 
+                          title: 'Enable Lazy Loading', 
+                          applies: !selectedImage.isLazy, 
+                          desc: 'Defers download of off-screen/below-fold images' 
+                        },
+                        { 
+                          title: 'Add Width and Height attributes', 
+                          applies: true, // recommendations for all by default
+                          desc: 'Prevents Cumulative Layout Shift (CLS) on content render' 
+                        },
+                        { 
+                          title: 'Serve responsive images', 
+                          applies: selectedImage.originalSize > 300 * 1024, 
+                          desc: 'Uses srcset/sizes queries to scale resolution down on mobile devices' 
+                        }
+                      ].map((rec, idx) => (
+                        <div key={idx} className="flex items-start gap-2.5 p-2 bg-dark-800/10 border border-slate-800/30 rounded-lg">
+                          <div className="mt-0.5 shrink-0">
+                            {rec.applies ? (
+                              <span className="flex h-3.5 w-3.5 bg-rose-500/10 rounded-full items-center justify-center text-[9px] text-rose-455 font-bold font-mono">
+                                !
+                              </span>
+                            ) : (
+                              <span className="flex h-3.5 w-3.5 bg-emerald-500/10 rounded-full items-center justify-center text-[9px] text-emerald-450 font-mono">
+                                ✓
+                              </span>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`text-[10px] font-bold ${rec.applies ? 'text-rose-400' : 'text-slate-400'}`}>
+                              {rec.title}
+                            </p>
+                            <p className="text-[9px] text-slate-550 leading-tight mt-0.5">{rec.desc}</p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className={`text-[10px] font-bold ${rec.applies ? 'text-rose-400' : 'text-slate-400'}`}>
-                            {rec.title}
-                          </p>
-                          <p className="text-[9px] text-slate-550 leading-tight mt-0.5">{rec.desc}</p>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-4 bg-rose-500/5 border border-rose-500/10 rounded-xl flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-rose-400 mt-0.5 shrink-0" />
+                    <div>
+                      <h5 className="text-xs font-bold text-rose-400">Broken Image Detected</h5>
+                      <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        This image could not be loaded or retrieved. No optimization checklist or metrics are available. Please verify the URL structure or check if the image has been deleted from the origin server.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Modal Footer Actions */}
               <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-between gap-4">
-                <div className="text-[9px] text-slate-500 font-mono truncate max-w-[150px]">
+                <div className="text-[9px] text-slate-550 font-mono truncate max-w-[150px]">
                   Page: {selectedImage.pageUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}
                 </div>
                 
@@ -1118,14 +1174,16 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                   >
                     Close
                   </button>
-                  <a 
-                    href={selectedImage.src}
-                    download
-                    className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-550 hover:to-indigo-450 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-600/10 flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    <span>Download Raw</span>
-                  </a>
+                  {!selectedImage.isBroken && (
+                    <a 
+                      href={selectedImage.src}
+                      download
+                      className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-550 hover:to-indigo-450 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-600/10 flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Download Raw</span>
+                    </a>
+                  )}
                 </div>
               </div>
 

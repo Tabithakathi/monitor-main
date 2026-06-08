@@ -228,14 +228,20 @@ const fetchSingleImageMetadata = async (imageUrl) => {
       imageUrl,
       contentLength: null,
       actualFileSize: 0,
+      format: 'png',
       success: false,
-      error: 'Invalid or missing protocol'
+      error: 'Invalid or missing protocol',
+      isValid: false,
+      httpStatus: null,
+      errorReason: 'Invalid URL'
     };
   }
 
   let contentLength = null;
   let actualFileSize = null;
   let format = null;
+  let httpStatus = null;
+  let errorReason = null;
 
   try {
     // 1. Try HEAD request
@@ -248,6 +254,8 @@ const fetchSingleImageMetadata = async (imageUrl) => {
       },
       validateStatus: () => true
     });
+
+    httpStatus = headResponse.status;
 
     if (headResponse.status === 200) {
       const contentType = (headResponse.headers['content-type'] || '').toLowerCase();
@@ -267,14 +275,22 @@ const fetchSingleImageMetadata = async (imageUrl) => {
             actualFileSize = parsedLen;
           }
         }
+      } else {
+        errorReason = 'Invalid URL';
       }
+    } else if (headResponse.status === 404) {
+      errorReason = '404 Not Found';
+    } else if (headResponse.status === 403) {
+      errorReason = '403 Forbidden';
+    } else {
+      errorReason = 'Invalid URL';
     }
   } catch (err) {
     // Ignore HEAD errors and fall back to GET
   }
 
   // 2. Try GET request if HEAD didn't work or didn't get Content-Length
-  if (actualFileSize === null) {
+  if (actualFileSize === null && errorReason !== '404 Not Found' && errorReason !== '403 Forbidden') {
     try {
       const getResponse = await axiosLib.get(imageUrl, {
         timeout: 5000,
@@ -286,6 +302,8 @@ const fetchSingleImageMetadata = async (imageUrl) => {
         },
         validateStatus: () => true
       });
+
+      httpStatus = getResponse.status;
 
       if (getResponse.status === 200) {
         const contentType = (getResponse.headers['content-type'] || '').toLowerCase();
@@ -307,27 +325,20 @@ const fetchSingleImageMetadata = async (imageUrl) => {
 
           if (getResponse.data) {
             actualFileSize = getResponse.data.length;
+            errorReason = null; // Reset errorReason since download succeeded
           }
+        } else {
+          errorReason = 'Invalid URL';
         }
+      } else if (getResponse.status === 404) {
+        errorReason = '404 Not Found';
+      } else if (getResponse.status === 403) {
+        errorReason = '403 Forbidden';
+      } else {
+        errorReason = 'Invalid URL';
       }
     } catch (err) {
-      const parts = imageUrl.split('?')[0].split('/');
-      const filename = parts.pop() || '';
-      const ext = filename.split('.').pop()?.toLowerCase();
-      if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) {
-        format = ext === 'jpeg' ? 'jpg' : ext;
-      } else {
-        format = 'png';
-      }
-
-      return {
-        imageUrl,
-        contentLength,
-        actualFileSize: 0,
-        format,
-        success: false,
-        error: err.message
-      };
+      errorReason = 'Invalid URL';
     }
   }
 
@@ -342,12 +353,23 @@ const fetchSingleImageMetadata = async (imageUrl) => {
     }
   }
 
+  const isValid = actualFileSize !== null && actualFileSize > 0 && !errorReason;
+
+  if (!isValid && !errorReason) {
+    if (httpStatus === 404) errorReason = '404 Not Found';
+    else if (httpStatus === 403) errorReason = '403 Forbidden';
+    else errorReason = 'Invalid URL';
+  }
+
   return {
     imageUrl,
     contentLength,
     actualFileSize: actualFileSize || 0,
     format,
-    success: actualFileSize !== null
+    success: isValid,
+    httpStatus,
+    isValid,
+    errorReason: isValid ? null : errorReason
   };
 };
 
