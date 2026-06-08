@@ -248,12 +248,17 @@ const fetchSingleImageMetadata = async (imageUrl) => {
       validateStatus: () => true
     });
 
-    const cl = headResponse.headers['content-length'];
-    if (cl) {
-      const parsedLen = parseInt(cl, 10);
-      if (!isNaN(parsedLen) && parsedLen > 0) {
-        contentLength = parsedLen;
-        actualFileSize = parsedLen;
+    if (headResponse.status === 200) {
+      const contentType = headResponse.headers['content-type'] || '';
+      if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
+        const cl = headResponse.headers['content-length'];
+        if (cl) {
+          const parsedLen = parseInt(cl, 10);
+          if (!isNaN(parsedLen) && parsedLen > 0) {
+            contentLength = parsedLen;
+            actualFileSize = parsedLen;
+          }
+        }
       }
     }
   } catch (err) {
@@ -274,16 +279,21 @@ const fetchSingleImageMetadata = async (imageUrl) => {
         validateStatus: () => true
       });
 
-      const cl = getResponse.headers['content-length'];
-      if (cl) {
-        const parsedLen = parseInt(cl, 10);
-        if (!isNaN(parsedLen)) {
-          contentLength = parsedLen;
-        }
-      }
+      if (getResponse.status === 200) {
+        const contentType = getResponse.headers['content-type'] || '';
+        if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
+          const cl = getResponse.headers['content-length'];
+          if (cl) {
+            const parsedLen = parseInt(cl, 10);
+            if (!isNaN(parsedLen)) {
+              contentLength = parsedLen;
+            }
+          }
 
-      if (getResponse.status === 200 && getResponse.data) {
-        actualFileSize = getResponse.data.length;
+          if (getResponse.data) {
+            actualFileSize = getResponse.data.length;
+          }
+        }
       }
     } catch (err) {
       return {
