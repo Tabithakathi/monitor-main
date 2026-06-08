@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import axios from 'axios';
 import { 
   ResponsiveContainer, 
   BarChart, 
@@ -76,6 +77,10 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
   const [previewDimensions, setPreviewDimensions] = useState(null);
   const [previewError, setPreviewError] = useState(false);
 
+  // Real image size states
+  const [imageSizesMap, setImageSizesMap] = useState({});
+  const [loadingSizes, setLoadingSizes] = useState(false);
+
   useEffect(() => {
     setPreviewDimensions(null);
     setPreviewError(false);
@@ -89,6 +94,89 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     }
     return raw;
   }, [stats?.url, url]);
+
+  // Extract unique image URLs to retrieve real sizes for
+  const rawImageUrls = useMemo(() => {
+    const urls = [];
+    const seen = new Set();
+    const addUrl = (src) => {
+      if (!src || src.startsWith('data:') || seen.has(src)) return;
+      seen.add(src);
+      urls.push(src);
+    };
+
+    // Gather from crawlData if available
+    if (crawlData?.siteWideImages?.missingAltImages) {
+      crawlData.siteWideImages.missingAltImages.forEach(img => addUrl(img.src));
+    }
+
+    // Gather from seoData imageAnalysis
+    if (stats?.seoData?.imageAnalysis?.missingAltSrcs) {
+      stats.seoData.imageAnalysis.missingAltSrcs.forEach(img => {
+        const srcUrl = typeof img === 'string' ? img : img?.src;
+        addUrl(srcUrl);
+      });
+    }
+
+    // Default assets
+    const defaultAssets = [
+      { path: '/assets/images/hero-banner.jpg' },
+      { path: '/brand/logo.png' },
+      { path: '/images/features/dashboard-preview.png' },
+      { path: '/uploads/avatars/profile-avatar.png' },
+      { path: '/assets/img/footer-bg.jpg' },
+      { path: '/assets/icons/check-icon.svg' },
+      { path: '/media/thumbnails/intro-video.webp' },
+      { path: '/gallery/gallery-img-1.jpeg' },
+      { path: '/gallery/gallery-img-2.jpg' },
+      { path: '/images/mobile/mobile-banner.jpg' },
+      { path: '/assets/loader.gif' }
+    ];
+
+    defaultAssets.forEach(asset => {
+      const fullUrl = `${targetUrl.replace(/\/$/, '')}${asset.path}`;
+      addUrl(fullUrl);
+    });
+
+    return urls;
+  }, [crawlData, stats, targetUrl]);
+
+  // Fetch actual metadata from backend proxy
+  useEffect(() => {
+    if (rawImageUrls.length === 0) {
+      setImageSizesMap({});
+      return;
+    }
+
+    let isMounted = true;
+    const fetchSizes = async () => {
+      setLoadingSizes(true);
+      try {
+        const response = await axios.post('/api/image-metadata', { urls: rawImageUrls });
+        if (isMounted && response.data?.success) {
+          const map = {};
+          response.data.results.forEach(res => {
+            map[res.imageUrl] = {
+              contentLength: res.contentLength,
+              actualFileSize: res.actualFileSize,
+              success: res.success
+            };
+          });
+          setImageSizesMap(map);
+        }
+      } catch (err) {
+        console.error("Failed to fetch image sizes:", err);
+      } finally {
+        if (isMounted) setLoadingSizes(false);
+      }
+    };
+
+    fetchSizes();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [rawImageUrls]);
 
   // 2. Build and Enrich Image List
   const images = useMemo(() => {
@@ -122,7 +210,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
       });
     }
 
-    // Augment with default dummy assets for a rich analyzer dashboard if the crawl results are empty
+    // Augment with default dummy assets
     const defaultAssets = [
       { name: 'hero-banner.jpg', path: '/assets/images/hero-banner.jpg', isLazy: false },
       { name: 'logo.png', path: '/brand/logo.png', isLazy: false },
@@ -146,55 +234,49 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     return rawImages.map(img => {
       const name = getFileName(img.src);
       const ext = name.split('.').pop()?.toLowerCase() || 'png';
-      const hash = getDeterministicHash(img.src);
 
-      // Determine original size based on file type and deterministic hash
-      let originalSize = 1024 * 50; // default 50KB
-      if (name.includes('hero') || name.includes('banner')) {
-        originalSize = 950 * 1024 + (hash % (1500 * 1024)); // 950KB - 2.4MB
-      } else if (name.includes('logo')) {
-        originalSize = 350 * 1024 + (hash % (250 * 1024)); // 350KB - 600KB
-      } else if (name.includes('dashboard') || name.includes('preview')) {
-        originalSize = 650 * 1024 + (hash % (600 * 1024)); // 650KB - 1.25MB
-      } else if (ext === 'jpg' || ext === 'jpeg') {
-        originalSize = 150 * 1024 + (hash % (600 * 1024)); // 150KB - 750KB
-      } else if (ext === 'png') {
-        originalSize = 250 * 1024 + (hash % (750 * 1024)); // 250KB - 1.0MB
-      } else if (ext === 'webp' || ext === 'avif') {
-        originalSize = 40 * 1024 + (hash % (100 * 1024)); // 40KB - 140KB
-      } else if (ext === 'svg') {
-        originalSize = 3 * 1024 + (hash % (15 * 1024)); // 3KB - 18KB
-      } else if (ext === 'gif') {
-        originalSize = 200 * 1024 + (hash % (500 * 1024)); // 200KB - 700KB
-      }
+      // Look up real sizes
+      const sizeInfo = imageSizesMap[img.src];
+      const originalSize = sizeInfo ? sizeInfo.actualFileSize : 0;
 
-      // Determine optimized size and savings percentage
-      let optimizedSize = originalSize;
-      let savingsPct = 0;
-      
-      if (ext === 'png') {
-        // PNG converted to WebP saves 70-80%
-        savingsPct = 70 + (hash % 12);
-        optimizedSize = Math.round(originalSize * (1 - savingsPct / 100));
-      } else if (ext === 'jpg' || ext === 'jpeg') {
-        // JPEG compressed/converted saves 60-75%
-        savingsPct = 60 + (hash % 16);
-        optimizedSize = Math.round(originalSize * (1 - savingsPct / 100));
-      } else if (ext === 'gif') {
-        // GIF converted to WebP saves 80-90%
-        savingsPct = 80 + (hash % 11);
-        optimizedSize = Math.round(originalSize * (1 - savingsPct / 100));
-      } else if (ext === 'webp' || ext === 'avif') {
-        // Already optimized, minimal savings
-        savingsPct = hash % 8; // 0-7%
-        optimizedSize = Math.round(originalSize * (1 - savingsPct / 100));
-      } else if (ext === 'svg') {
-        // SVG vectors, already optimized
-        savingsPct = 0;
+      // Format-Specific Compression Estimate
+      const getCompressionEstimate = (formatExt) => {
+        const format = formatExt?.toLowerCase();
+        if (format === 'png') return 75; // 75% saving
+        if (format === 'jpg' || format === 'jpeg') return 70; // 70% saving
+        if (format === 'gif') return 85; // 85% saving
+        if (format === 'webp' || format === 'avif') return 5; // 5% saving
+        if (format === 'svg') return 0; // 0% saving
+        return 10; // default 10% saving for other formats
+      };
+
+      const compressionEstimateVal = getCompressionEstimate(ext);
+
+      // Determine optimized size and savings percentage based on actual size
+      let optimizedSize = Math.round(originalSize * (1 - compressionEstimateVal / 100));
+
+      // Validation Rules
+      if (optimizedSize > originalSize) {
         optimizedSize = originalSize;
       }
+      if (optimizedSize < 0) {
+        optimizedSize = 0;
+      }
 
-      const potentialSaving = originalSize - optimizedSize;
+      let potentialSaving = originalSize - optimizedSize;
+      if (potentialSaving > originalSize) {
+        potentialSaving = originalSize;
+      }
+      if (potentialSaving < 0) {
+        potentialSaving = 0;
+      }
+
+      let savingsPct = originalSize > 0 
+        ? Math.round((potentialSaving / originalSize) * 100) 
+        : 0;
+
+      if (savingsPct < 0) savingsPct = 0;
+      if (savingsPct > 100) savingsPct = 100;
 
       // Determine severity
       let severity = 'green';
@@ -223,10 +305,16 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
         potentialSaving,
         savingsPct,
         severity,
-        recs
+        recs,
+        // Debug information
+        imageUrl: img.src,
+        contentLength: sizeInfo ? sizeInfo.contentLength : null,
+        actualFileSize: originalSize,
+        compressionEstimate: `${compressionEstimateVal}%`,
+        finalRecommendedSize: optimizedSize
       };
     });
-  }, [crawlData, stats, targetUrl]);
+  }, [crawlData, stats, targetUrl, imageSizesMap]);
 
   // 3. Compute Summary Statistics
   const summary = useMemo(() => {
@@ -376,6 +464,16 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
       { label: 'Serve responsive images', count: responsive, status: responsive > 2 ? 'warning' : 'ok' },
     ];
   }, [images]);
+
+  if (loadingSizes && Object.keys(imageSizesMap).length === 0) {
+    return (
+      <div className="py-24 text-center glass-card p-6 rounded-2xl">
+        <RefreshCw className="h-8 w-8 text-indigo-500 rotate-infinite mx-auto mb-4" />
+        <h4 className="font-extrabold text-slate-300">Analyzing real image file sizes...</h4>
+        <p className="text-xs text-slate-500 mt-1">Fetching real-time metadata and Content-Length headers via SRE proxy</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-fade-in-up">

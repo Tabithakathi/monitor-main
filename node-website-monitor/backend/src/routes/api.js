@@ -217,4 +217,106 @@ router.post('/scanned-websites/favorite', async (req, res) => {
   }
 });
 
+// ── Image Metadata Proxy (NEW) ───────────────────────────────────────────────
+const axiosLib = require('axios');
+const httpsLib = require('https');
+const imageAgent = new httpsLib.Agent({ rejectUnauthorized: false });
+
+const fetchSingleImageMetadata = async (imageUrl) => {
+  if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) {
+    return {
+      imageUrl,
+      contentLength: null,
+      actualFileSize: 0,
+      success: false,
+      error: 'Invalid or missing protocol'
+    };
+  }
+
+  let contentLength = null;
+  let actualFileSize = null;
+
+  try {
+    // 1. Try HEAD request
+    const headResponse = await axiosLib.head(imageUrl, {
+      timeout: 3000,
+      httpsAgent: imageAgent,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MonitorProSRE/1.0',
+        'Accept': 'image/*'
+      },
+      validateStatus: () => true
+    });
+
+    const cl = headResponse.headers['content-length'];
+    if (cl) {
+      const parsedLen = parseInt(cl, 10);
+      if (!isNaN(parsedLen) && parsedLen > 0) {
+        contentLength = parsedLen;
+        actualFileSize = parsedLen;
+      }
+    }
+  } catch (err) {
+    // Ignore HEAD errors and fall back to GET
+  }
+
+  // 2. Try GET request if HEAD didn't work or didn't get Content-Length
+  if (actualFileSize === null) {
+    try {
+      const getResponse = await axiosLib.get(imageUrl, {
+        timeout: 5000,
+        responseType: 'arraybuffer',
+        httpsAgent: imageAgent,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MonitorProSRE/1.0',
+          'Accept': 'image/*'
+        },
+        validateStatus: () => true
+      });
+
+      const cl = getResponse.headers['content-length'];
+      if (cl) {
+        const parsedLen = parseInt(cl, 10);
+        if (!isNaN(parsedLen)) {
+          contentLength = parsedLen;
+        }
+      }
+
+      if (getResponse.status === 200 && getResponse.data) {
+        actualFileSize = getResponse.data.length;
+      }
+    } catch (err) {
+      return {
+        imageUrl,
+        contentLength,
+        actualFileSize: 0,
+        success: false,
+        error: err.message
+      };
+    }
+  }
+
+  return {
+    imageUrl,
+    contentLength,
+    actualFileSize: actualFileSize || 0,
+    success: actualFileSize !== null
+  };
+};
+
+router.post('/image-metadata', async (req, res) => {
+  const { urls } = req.body;
+  if (!urls || !Array.isArray(urls)) {
+    return res.status(400).json({ error: 'Array of image URLs is required in request body.' });
+  }
+
+  try {
+    const results = await Promise.all(urls.map(url => fetchSingleImageMetadata(url)));
+    res.status(200).json({ success: true, results });
+  } catch (err) {
+    res.status(500).json({ error: `Image metadata fetch failed: ${err.message}` });
+  }
+});
+
 module.exports = router;
+
