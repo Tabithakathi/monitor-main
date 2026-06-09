@@ -35,10 +35,14 @@ import {
  * Format bytes to readable string
  */
 const formatBytes = (bytes) => {
-  if (!bytes || bytes === 0) return '0 KB';
+  if (!bytes || bytes === 0) return '—';
   const kb = bytes / 1024;
+  if (kb < 1) {
+    const rounded = parseFloat(kb.toFixed(2));
+    return (rounded > 0 ? rounded : 0.01) + ' KB';
+  }
   if (kb < 1024) {
-    return Math.round(kb) + ' KB';
+    return parseFloat(kb.toFixed(1)) + ' KB';
   } else {
     const mb = kb / 1024;
     return parseFloat(mb.toFixed(1)) + ' MB';
@@ -162,25 +166,57 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     let isMounted = true;
     const fetchSizes = async () => {
       setLoadingSizes(true);
+      
+      // Initialize map with pending statuses
+      const initialMap = {};
+      rawImageUrls.forEach(url => {
+        initialMap[url] = { isValid: false, status: 'pending' };
+      });
+      setImageSizesMap(initialMap);
+
       try {
-        const response = await axios.post('/api/image-metadata', { urls: rawImageUrls, baseUrl: targetUrl });
-        if (isMounted && response.data?.success) {
-          const map = {};
-          response.data.results.forEach(res => {
-            map[res.imageUrl] = {
-              contentLength: res.contentLength,
-              actualFileSize: res.actualFileSize,
-              format: res.format,
-              success: res.success,
-              isValid: res.isValid,
-              httpStatus: res.httpStatus,
-              errorReason: res.errorReason
-            };
-          });
-          setImageSizesMap(map);
-        }
+        // Fetch each URL individually in parallel
+        rawImageUrls.forEach(async (imgUrl) => {
+          try {
+            const response = await axios.post('/api/image-metadata', { urls: [imgUrl], baseUrl: targetUrl });
+            if (isMounted && response.data?.success && response.data.results?.[0]) {
+              const res = response.data.results[0];
+              setImageSizesMap(prev => ({
+                ...prev,
+                [imgUrl]: {
+                  contentLength: res.contentLength,
+                  actualFileSize: res.actualFileSize,
+                  format: res.format,
+                  success: res.success,
+                  isValid: res.isValid,
+                  httpStatus: res.httpStatus,
+                  errorReason: res.errorReason,
+                  status: res.isValid ? 'success' : 'failed'
+                }
+              }));
+            } else {
+              if (isMounted) {
+                setImageSizesMap(prev => ({
+                  ...prev,
+                  [imgUrl]: { isValid: false, status: 'failed', errorReason: 'Access Denied' }
+                }));
+              }
+            }
+          } catch (err) {
+            if (isMounted) {
+              let reason = 'Access Denied';
+              if (err.response && err.response.status === 404) {
+                reason = '404 Not Found';
+              }
+              setImageSizesMap(prev => ({
+                ...prev,
+                [imgUrl]: { isValid: false, status: 'failed', errorReason: reason }
+              }));
+            }
+          }
+        });
       } catch (err) {
-        console.error("Failed to fetch image sizes:", err);
+        console.error("Failed to start image sizes fetch:", err);
       } finally {
         if (isMounted) setLoadingSizes(false);
       }
@@ -261,8 +297,9 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
       // Look up real sizes and backend-detected format
       const sizeInfo = imageSizesMap[img.src];
-      const isBroken = sizeInfo ? !sizeInfo.isValid : true;
-      const brokenReason = sizeInfo ? sizeInfo.errorReason : 'Access Denied';
+      const isPending = sizeInfo ? sizeInfo.status === 'pending' : true;
+      const isBroken = sizeInfo ? (!sizeInfo.isValid && sizeInfo.status !== 'pending') : false;
+      const brokenReason = sizeInfo ? sizeInfo.errorReason : null;
 
       const originalSize = (sizeInfo && sizeInfo.isValid) ? sizeInfo.actualFileSize : 0;
       const detectedFormat = (sizeInfo && sizeInfo.isValid) ? (sizeInfo.format || ext) : ext;
@@ -272,7 +309,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
       let potentialSaving = 0;
       let savingsPct = 0;
 
-      if (!isBroken) {
+      if (!isBroken && !isPending) {
         // Format and size dependent compression estimate (TinyPNG simulation)
         const getCompressionEstimate = (formatName, size) => {
           const fmt = formatName?.toLowerCase();
@@ -341,7 +378,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
       }
 
       // Temporary Console Logs for Debugging
-      if (sizeInfo) {
+      if (sizeInfo && sizeInfo.status !== 'pending') {
         console.log(`[FRONTEND DEBUG] Image URL: ${img.src}`);
         console.log(`[FRONTEND DEBUG] HTTP Status: ${sizeInfo.httpStatus || 'N/A'}`);
         console.log(`[FRONTEND DEBUG] Content-Type: ${sizeInfo.format || 'N/A'}`);
@@ -354,7 +391,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
       // Determine severity
       let severity = 'green';
-      if (!isBroken) {
+      if (!isBroken && !isPending) {
         if (potentialSaving > 400 * 1024 || (originalSize > 500 * 1024 && savingsPct > 50)) {
           severity = 'red';
         } else if (potentialSaving > 80 * 1024 || savingsPct > 15) {
@@ -364,7 +401,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
       // Generate recommendation checklists
       const recs = [];
-      if (!isBroken) {
+      if (!isBroken && !isPending) {
         if (detectedFormat === 'png') recs.push('Convert PNG to WebP');
         if (detectedFormat === 'jpg' || detectedFormat === 'jpeg') recs.push('Compress JPEG');
         if (detectedFormat === 'gif') recs.push('Replace animated GIF with WebP/video');
@@ -385,6 +422,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
         severity,
         recs,
         isBroken,
+        isPending,
         brokenReason,
         // Debug information
         imageUrl: img.src,
@@ -400,9 +438,12 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
   const summary = useMemo(() => {
     let totalOriginal = 0;
     let totalOptimized = 0;
+    let pendingCount = 0;
     
     images.forEach(img => {
-      if (!img.isBroken) {
+      if (img.isPending) {
+        pendingCount++;
+      } else if (!img.isBroken) {
         totalOriginal += img.originalSize;
         totalOptimized += img.optimizedSize;
       }
@@ -423,6 +464,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
     return {
       totalImages: images.length,
+      pendingCount,
       totalOriginal,
       totalOptimized,
       totalSavings,
@@ -577,9 +619,16 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-1">IMAGE OPTIMIZATION INTELLIGENCE</span>
             <h2 className="text-xl font-extrabold text-slate-200 tracking-tight flex items-center gap-2">
               <span>Image Optimization Report</span>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">
-                {targetUrl.replace(/^https?:\/\//i, '').replace(/\/$/, '')}
-              </span>
+              {summary.pendingCount > 0 ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-black tracking-widest animate-pulse">
+                  <RefreshCw className="h-3 w-3 rotate-infinite" />
+                  REAL-TIME MONITORING ({summary.totalImages - summary.pendingCount}/{summary.totalImages})
+                </span>
+              ) : (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">
+                  {targetUrl.replace(/^https?:\/\//i, '').replace(/\/$/, '')}
+                </span>
+              )}
             </h2>
           </div>
           
@@ -607,28 +656,40 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
           </div>
 
           <div className="bg-dark-900/10 border border-slate-800/40 p-4 rounded-xl flex flex-col justify-between">
-            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Original Weight</span>
+            <span className="text-[10px] text-slate-550 font-bold uppercase tracking-wider">Original Weight</span>
             <div className="mt-2">
-              <span className="text-2xl font-black text-rose-400">{formatBytes(summary.totalOriginal)}</span>
+              <span className="text-2xl font-black text-rose-400">
+                {summary.pendingCount === summary.totalImages ? 'Calculating...' : `${formatBytes(summary.totalOriginal)}${summary.pendingCount > 0 ? ' (Probing...)' : ''}`}
+              </span>
             </div>
             <p className="text-[9px] text-slate-550 mt-2">Combined raw payload size</p>
           </div>
 
           <div className="bg-dark-900/10 border border-slate-800/40 p-4 rounded-xl flex flex-col justify-between">
-            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Optimized Weight</span>
+            <span className="text-[10px] text-slate-550 font-bold uppercase tracking-wider">Optimized Weight</span>
             <div className="mt-2">
-              <span className="text-2xl font-black text-emerald-400">{formatBytes(summary.totalOptimized)}</span>
+              <span className="text-2xl font-black text-emerald-400">
+                {summary.pendingCount === summary.totalImages ? 'Calculating...' : `${formatBytes(summary.totalOptimized)}${summary.pendingCount > 0 ? ' (Probing...)' : ''}`}
+              </span>
             </div>
             <p className="text-[9px] text-emerald-500 font-bold mt-2 flex items-center gap-1">
               <TrendingDown className="h-3 w-3" />
-              <span>Save {formatBytes(summary.totalSavings)}</span>
+              <span>
+                {summary.pendingCount === summary.totalImages 
+                  ? 'Calculating...' 
+                  : summary.totalSavings > 0 
+                    ? `Save ${formatBytes(summary.totalSavings)}${summary.pendingCount > 0 ? '...' : ''}` 
+                    : 'Optimized'}
+              </span>
             </p>
           </div>
 
           <div className="bg-indigo-500/5 border border-indigo-500/10 p-4 rounded-xl flex flex-col justify-between">
             <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">Total Savings</span>
             <div className="mt-2">
-              <span className="text-3xl font-black text-indigo-400">{summary.savingsPercentage}%</span>
+              <span className="text-3xl font-black text-indigo-400 font-mono">
+                {summary.pendingCount === summary.totalImages ? 'Calculating...' : `${summary.savingsPercentage}%${summary.pendingCount > 0 ? '...' : ''}`}
+              </span>
             </div>
             <p className="text-[9px] text-indigo-400/80 font-bold mt-2">TinyPNG-style savings</p>
           </div>
@@ -929,6 +990,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       <span className="flex h-2.5 w-2.5 relative">
                         <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                          img.isPending ? 'bg-indigo-550 animate-pulse' :
                           img.isBroken ? 'bg-slate-500' :
                           img.severity === 'red' ? 'bg-rose-500' : 
                           img.severity === 'yellow' ? 'bg-amber-500' : 'bg-emerald-500'
@@ -941,7 +1003,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                       <div className="font-bold text-slate-200 group-hover:text-indigo-400 transition-colors truncate">
                         {img.name}
                       </div>
-                      {img.isBroken && (
+                      {!img.isPending && img.isBroken && (
                         <div className="text-[10px] text-rose-400 font-bold mt-0.5 flex items-center gap-1">
                           <span>⚠️ Broken Image: {img.brokenReason || 'Invalid URL'}</span>
                         </div>
@@ -957,17 +1019,26 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
                     {/* Original Size */}
                     <td className="py-3.5 px-4 font-mono font-bold text-slate-350 whitespace-nowrap">
-                      {img.isBroken ? '—' : formatBytes(img.originalSize)}
+                      {img.isPending ? (
+                        <span className="text-[10px] text-indigo-400/80 font-bold flex items-center gap-1">
+                          <RefreshCw className="h-3 w-3 rotate-infinite shrink-0" />
+                          Monitoring...
+                        </span>
+                      ) : img.isBroken ? '—' : formatBytes(img.originalSize)}
                     </td>
 
                     {/* Optimized Size */}
                     <td className="py-3.5 px-4 font-mono font-bold text-emerald-400/90 whitespace-nowrap">
-                      {img.isBroken ? '—' : formatBytes(img.optimizedSize)}
+                      {img.isPending ? (
+                        <span className="text-[10px] text-slate-550 italic">Pending</span>
+                      ) : img.isBroken ? '—' : formatBytes(img.optimizedSize)}
                     </td>
 
                     {/* Potential Savings */}
                     <td className="py-3.5 px-4 font-mono font-bold whitespace-nowrap">
-                      {img.isBroken ? (
+                      {img.isPending ? (
+                        <span className="text-[10px] text-slate-550 italic">Pending</span>
+                      ) : img.isBroken ? (
                         <span className="text-slate-500">—</span>
                       ) : img.potentialSaving > 0 ? (
                         <span className={img.severity === 'red' ? 'text-rose-400' : img.severity === 'yellow' ? 'text-amber-400' : 'text-slate-500'}>
@@ -980,7 +1051,9 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
                     {/* Savings Percentage */}
                     <td className="py-3.5 px-4 text-right font-mono font-black whitespace-nowrap">
-                      {img.isBroken ? (
+                      {img.isPending ? (
+                        <span className="text-[10px] text-slate-550 italic">Pending</span>
+                      ) : img.isBroken ? (
                         <span className="text-slate-500">—</span>
                       ) : img.savingsPct > 0 ? (
                         <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
@@ -1006,32 +1079,24 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
       {/* ── IMAGE DETAILS MODAL ──────────────────────────────────────── */}
       {selectedImage && (
         <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-md animate-fade">
-          <div className="glass-card rounded-2xl w-full max-w-3xl mx-4 overflow-hidden shadow-2xl flex flex-col md:flex-row relative">
-            
-            {/* Close Button */}
-            <button 
-              onClick={() => setSelectedImage(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-lg border border-slate-800 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors z-20 cursor-pointer"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
+          <div className="glass-card rounded-2xl w-full max-w-3xl mx-4 flex flex-col md:flex-row overflow-hidden relative border border-slate-850 shadow-2xl animate-scale-up">
             {/* Left: Preview Panel */}
             <div className="md:w-1/2 bg-slate-950/30 p-8 border-b md:border-b-0 md:border-r border-slate-800/60 flex flex-col justify-center items-center relative">
               <div className="absolute top-4 left-4">
                 <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${
+                  selectedImage.isPending ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 animate-pulse' :
                   selectedImage.isBroken ? 'bg-slate-500/10 text-slate-400 border-slate-500/20' :
                   selectedImage.severity === 'red' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 
                   selectedImage.severity === 'yellow' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
                   'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                 }`}>
-                  {selectedImage.isBroken ? `Broken Image: ${selectedImage.brokenReason || 'Invalid URL'}` : selectedImage.severity === 'red' ? 'Highly Unoptimized' : selectedImage.severity === 'yellow' ? 'Needs Improvement' : 'Optimized'}
+                  {selectedImage.isPending ? 'Checking Metrics...' : selectedImage.isBroken ? `Broken Image: ${selectedImage.brokenReason || 'Invalid URL'}` : selectedImage.severity === 'red' ? 'Highly Unoptimized' : selectedImage.severity === 'yellow' ? 'Needs Improvement' : 'Optimized'}
                 </span>
               </div>
 
               {/* Actual Image preview */}
               <div className="w-full max-h-60 flex items-center justify-center overflow-hidden rounded-xl border border-slate-800/40 p-4 bg-slate-900/40 shadow-inner mt-4">
-                {!selectedImage.isBroken && !previewError && (
+                {!selectedImage.isPending && !selectedImage.isBroken && !previewError && (
                   <img 
                     src={selectedImage.src} 
                     alt={selectedImage.name} 
@@ -1049,28 +1114,32 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                 )}
                 
                 {/* Fallback Display */}
-                {(selectedImage.isBroken || previewError) && (
+                {(selectedImage.isPending || selectedImage.isBroken || previewError) && (
                   <div 
                     id="preview-fallback-box" 
                     className="flex flex-col items-center justify-center py-12 text-slate-600 gap-3"
                   >
-                    <ImageIcon className="h-12 w-12 text-slate-750 animate-pulse" />
+                    {selectedImage.isPending ? (
+                      <RefreshCw className="h-12 w-12 text-indigo-400/80 rotate-infinite" />
+                    ) : (
+                      <ImageIcon className="h-12 w-12 text-slate-750 animate-pulse" />
+                    )}
                     <span className="text-[10px] text-slate-500 font-mono text-center truncate max-w-[200px]" title={selectedImage.src}>
                       {selectedImage.name}
                     </span>
-                    <span className="text-[10px] text-rose-500 font-semibold uppercase tracking-wider">
-                      {selectedImage.isBroken ? `Broken (${selectedImage.brokenReason})` : 'Preview unavailable'}
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      {selectedImage.isPending ? 'Fetching headers...' : selectedImage.isBroken ? `Broken (${selectedImage.brokenReason})` : 'Preview unavailable'}
                     </span>
                   </div>
                 )}
               </div>
               
               <div className="mt-4 w-full flex items-center justify-between text-[10px] text-slate-500">
-                <span className="font-mono">Format: <strong className="text-slate-350">{selectedImage.ext}</strong></span>
-                {!selectedImage.isBroken && previewDimensions && (
+                <span className="font-mono">Format: <strong className="text-slate-350">{selectedImage.isPending ? '—' : selectedImage.ext}</strong></span>
+                {!selectedImage.isPending && !selectedImage.isBroken && previewDimensions && (
                   <span className="font-mono">Dimensions: <strong className="text-indigo-400">{previewDimensions.width} × {previewDimensions.height} px</strong></span>
                 )}
-                <span className="font-mono">Savings: <strong className="text-emerald-400">{selectedImage.isBroken ? '—' : `-${selectedImage.savingsPct}%`}</strong></span>
+                <span className="font-mono">Savings: <strong className="text-emerald-400">{selectedImage.isPending || selectedImage.isBroken ? '—' : `-${selectedImage.savingsPct}%`}</strong></span>
               </div>
             </div>
 
@@ -1083,7 +1152,12 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                   <h4 className="text-base font-black text-slate-200 pr-8 truncate" title={selectedImage.name}>
                     {selectedImage.name}
                   </h4>
-                  {selectedImage.isBroken ? (
+                  {selectedImage.isPending ? (
+                    <div className="text-[10px] text-indigo-400 font-bold mt-1 flex items-center gap-1 animate-pulse">
+                      <RefreshCw className="h-3 w-3 rotate-infinite" />
+                      <span>Request enqueued on SRE proxy...</span>
+                    </div>
+                  ) : selectedImage.isBroken ? (
                     <div className="space-y-1.5 mt-2">
                       <div className="text-xs font-bold text-rose-400">
                         Status: <span className="font-extrabold uppercase bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 ml-1">Failed</span>
@@ -1109,22 +1183,36 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                 <div className="grid grid-cols-3 gap-3 p-3 bg-dark-900/10 border border-slate-800/40 rounded-xl text-center">
                   <div className="text-left border-r border-slate-800/80 pr-2">
                     <span className="text-[9px] text-slate-500 font-bold uppercase block">Original Size</span>
-                    <span className="text-xs font-black text-rose-455 font-mono">{selectedImage.isBroken ? '—' : formatBytes(selectedImage.originalSize)}</span>
+                    <span className="text-xs font-black text-rose-455 font-mono">
+                      {selectedImage.isPending ? 'Checking...' : selectedImage.isBroken ? '—' : formatBytes(selectedImage.originalSize)}
+                    </span>
                   </div>
                   <div className="text-left border-r border-slate-800/80 px-2">
                     <span className="text-[9px] text-slate-550 font-bold uppercase block">Recommended</span>
-                    <span className="text-xs font-black text-emerald-400 font-mono">{selectedImage.isBroken ? '—' : formatBytes(selectedImage.optimizedSize)}</span>
+                    <span className="text-xs font-black text-emerald-400 font-mono">
+                      {selectedImage.isPending ? 'Pending...' : selectedImage.isBroken ? '—' : formatBytes(selectedImage.optimizedSize)}
+                    </span>
                   </div>
                   <div className="text-left pl-2">
                     <span className="text-[9px] text-indigo-450 font-bold uppercase block">Potential Saving</span>
                     <span className="text-xs font-black text-indigo-400 font-mono">
-                      {selectedImage.isBroken ? '—' : selectedImage.potentialSaving > 0 ? formatBytes(selectedImage.potentialSaving) : '0 KB'}
+                      {selectedImage.isPending ? 'Pending...' : selectedImage.isBroken ? '—' : selectedImage.potentialSaving > 0 ? formatBytes(selectedImage.potentialSaving) : '—'}
                     </span>
                   </div>
                 </div>
 
                 {/* Checklist Recommendations details */}
-                {!selectedImage.isBroken ? (
+                {selectedImage.isPending ? (
+                  <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-xl flex items-start gap-3">
+                    <RefreshCw className="h-5 w-5 text-indigo-400 mt-0.5 shrink-0 rotate-infinite" />
+                    <div>
+                      <h5 className="text-xs font-bold text-indigo-400 font-mono">Audit Pending</h5>
+                      <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        Currently performing live file header probes and SSL verification. Real-time recommendation checklist will populate shortly.
+                      </p>
+                    </div>
+                  </div>
+                ) : !selectedImage.isBroken ? (
                   <div className="space-y-2.5">
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Optimization Checklist</span>
                     
@@ -1193,7 +1281,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                     <AlertCircle className="h-5 w-5 text-rose-400 mt-0.5 shrink-0" />
                     <div>
                       <h5 className="text-xs font-bold text-rose-400">Broken Image Detected</h5>
-                      <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                      <p className="text-[10px] text-slate-550 mt-1 leading-relaxed">
                         This image could not be loaded or retrieved. No optimization checklist or metrics are available. Please verify the URL structure or check if the image has been deleted from the origin server.
                       </p>
                     </div>
