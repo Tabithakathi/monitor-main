@@ -222,18 +222,28 @@ const axiosLib = require('axios');
 const httpsLib = require('https');
 const imageAgent = new httpsLib.Agent({ rejectUnauthorized: false });
 
-const fetchSingleImageMetadata = async (imageUrl) => {
-  if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) {
+const fetchSingleImageMetadata = async (imageUrl, baseUrl = '') => {
+  let resolvedUrl = imageUrl;
+  
+  // Resolve relative URL using baseUrl if possible
+  if (baseUrl && !/^https?:\/\//i.test(imageUrl)) {
+    try {
+      resolvedUrl = new URL(imageUrl, baseUrl).href;
+    } catch (e) {
+      // ignore parsing issues, fallback to imageUrl
+    }
+  }
+
+  if (!resolvedUrl || !/^https?:\/\//i.test(resolvedUrl)) {
     return {
       imageUrl,
       contentLength: null,
       actualFileSize: 0,
       format: 'png',
       success: false,
-      error: 'Invalid or missing protocol',
       isValid: false,
       httpStatus: null,
-      errorReason: 'Invalid URL'
+      errorReason: 'Access Denied'
     };
   }
 
@@ -242,10 +252,32 @@ const fetchSingleImageMetadata = async (imageUrl) => {
   let format = null;
   let httpStatus = null;
   let errorReason = null;
+  let contentType = '';
+  let downloadedBytes = 0;
 
+  // Helper to extract extension
+  const getFormatFromUrlOrHeaders = (urlStr, typeHeader) => {
+    if (typeHeader) {
+      const type = typeHeader.toLowerCase();
+      if (type.includes('image/png')) return 'png';
+      if (type.includes('image/jpeg') || type.includes('image/jpg')) return 'jpg';
+      if (type.includes('image/gif')) return 'gif';
+      if (type.includes('image/webp')) return 'webp';
+      if (type.includes('image/svg') || type.includes('image/svg+xml')) return 'svg';
+      if (type.includes('image/avif')) return 'avif';
+    }
+    const parts = urlStr.split('?')[0].split('/');
+    const filename = parts.pop() || '';
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) {
+      return ext === 'jpeg' ? 'jpg' : ext;
+    }
+    return null;
+  };
+
+  // 1. Try HEAD request first
   try {
-    // 1. Try HEAD request
-    const headResponse = await axiosLib.head(imageUrl, {
+    const headResponse = await axiosLib.head(resolvedUrl, {
       timeout: 3000,
       httpsAgent: imageAgent,
       headers: {
@@ -258,15 +290,10 @@ const fetchSingleImageMetadata = async (imageUrl) => {
     httpStatus = headResponse.status;
 
     if (headResponse.status === 200) {
-      const contentType = (headResponse.headers['content-type'] || '').toLowerCase();
-      if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
-        if (contentType.includes('image/png')) format = 'png';
-        else if (contentType.includes('image/jpeg') || contentType.includes('image/jpg')) format = 'jpg';
-        else if (contentType.includes('image/gif')) format = 'gif';
-        else if (contentType.includes('image/webp')) format = 'webp';
-        else if (contentType.includes('image/svg') || contentType.includes('image/svg+xml')) format = 'svg';
-        else if (contentType.includes('image/avif')) format = 'avif';
-
+      contentType = (headResponse.headers['content-type'] || '').toLowerCase();
+      // Must verify it's an image
+      if (contentType.startsWith('image/')) {
+        format = getFormatFromUrlOrHeaders(resolvedUrl, contentType);
         const cl = headResponse.headers['content-length'];
         if (cl) {
           const parsedLen = parseInt(cl, 10);
@@ -276,23 +303,27 @@ const fetchSingleImageMetadata = async (imageUrl) => {
           }
         }
       } else {
-        errorReason = 'Invalid URL';
+        errorReason = 'Access Denied';
       }
     } else if (headResponse.status === 404) {
       errorReason = '404 Not Found';
     } else if (headResponse.status === 403) {
-      errorReason = '403 Forbidden';
+      errorReason = 'Access Denied';
     } else {
-      errorReason = 'Invalid URL';
+      errorReason = 'Access Denied';
     }
   } catch (err) {
-    // Ignore HEAD errors and fall back to GET
+    if (err.response) {
+      httpStatus = err.response.status;
+      if (httpStatus === 404) errorReason = '404 Not Found';
+      else if (httpStatus === 403) errorReason = 'Access Denied';
+    }
   }
 
-  // 2. Try GET request if HEAD didn't work or didn't get Content-Length
-  if (actualFileSize === null && errorReason !== '404 Not Found' && errorReason !== '403 Forbidden') {
+  // 2. Try GET request if HEAD didn't yield file size or failed/blocked
+  if (actualFileSize === null) {
     try {
-      const getResponse = await axiosLib.get(imageUrl, {
+      const getResponse = await axiosLib.get(resolvedUrl, {
         timeout: 5000,
         responseType: 'arraybuffer',
         httpsAgent: imageAgent,
@@ -306,60 +337,91 @@ const fetchSingleImageMetadata = async (imageUrl) => {
       httpStatus = getResponse.status;
 
       if (getResponse.status === 200) {
-        const contentType = (getResponse.headers['content-type'] || '').toLowerCase();
-        if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
-          if (contentType.includes('image/png')) format = 'png';
-          else if (contentType.includes('image/jpeg') || contentType.includes('image/jpg')) format = 'jpg';
-          else if (contentType.includes('image/gif')) format = 'gif';
-          else if (contentType.includes('image/webp')) format = 'webp';
-          else if (contentType.includes('image/svg') || contentType.includes('image/svg+xml')) format = 'svg';
-          else if (contentType.includes('image/avif')) format = 'avif';
-
+        contentType = (getResponse.headers['content-type'] || '').toLowerCase();
+        if (contentType.startsWith('image/')) {
+          format = getFormatFromUrlOrHeaders(resolvedUrl, contentType);
           const cl = getResponse.headers['content-length'];
           if (cl) {
             const parsedLen = parseInt(cl, 10);
-            if (!isNaN(parsedLen)) {
+            if (!isNaN(parsedLen) && parsedLen > 0) {
               contentLength = parsedLen;
             }
           }
-
           if (getResponse.data) {
-            actualFileSize = getResponse.data.length;
-            errorReason = null; // Reset errorReason since download succeeded
+            downloadedBytes = getResponse.data.length || getResponse.data.byteLength || 0;
+            actualFileSize = downloadedBytes;
+            errorReason = null; // reset if successful
           }
         } else {
-          errorReason = 'Invalid URL';
+          errorReason = 'Access Denied';
         }
       } else if (getResponse.status === 404) {
         errorReason = '404 Not Found';
       } else if (getResponse.status === 403) {
-        errorReason = '403 Forbidden';
+        errorReason = 'Access Denied';
       } else {
-        errorReason = 'Invalid URL';
+        errorReason = 'Access Denied';
       }
     } catch (err) {
-      errorReason = 'Invalid URL';
+      if (err.response) {
+        httpStatus = err.response.status;
+        if (httpStatus === 404) errorReason = '404 Not Found';
+        else if (httpStatus === 403) errorReason = 'Access Denied';
+      }
+      if (!errorReason) {
+        errorReason = 'Access Denied';
+      }
     }
   }
 
+  // Ensure format fallback
   if (!format) {
-    const parts = imageUrl.split('?')[0].split('/');
-    const filename = parts.pop() || '';
-    const ext = filename.split('.').pop()?.toLowerCase();
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) {
-      format = ext === 'jpeg' ? 'jpg' : ext;
-    } else {
-      format = 'png';
-    }
+    format = getFormatFromUrlOrHeaders(resolvedUrl, null) || 'png';
   }
 
   const isValid = actualFileSize !== null && actualFileSize > 0 && !errorReason;
 
   if (!isValid && !errorReason) {
     if (httpStatus === 404) errorReason = '404 Not Found';
-    else if (httpStatus === 403) errorReason = '403 Forbidden';
-    else errorReason = 'Invalid URL';
+    else errorReason = 'Access Denied';
   }
+
+  const formatLower = format.toLowerCase();
+  let savingsPct = 0;
+  let recommendedSize = actualFileSize || 0;
+  
+  if (isValid && actualFileSize > 0) {
+    let reduction = 0;
+    if (formatLower === 'png') {
+      reduction = 0.40 + Math.min(0.40, (actualFileSize / (1024 * 1024)) * 0.40);
+    } else if (formatLower === 'jpg' || formatLower === 'jpeg') {
+      reduction = 0.20 + Math.min(0.50, (actualFileSize / (1024 * 1024)) * 0.50);
+    } else if (formatLower === 'gif') {
+      reduction = 0.50 + Math.min(0.40, (actualFileSize / (2 * 1024 * 1024)) * 0.40);
+    } else if (formatLower === 'svg') {
+      reduction = 0.05 + Math.min(0.25, (actualFileSize / (100 * 1024)) * 0.25);
+    } else if (formatLower === 'webp') {
+      reduction = 0.05;
+    } else {
+      reduction = 0.0;
+    }
+    recommendedSize = Math.round(actualFileSize * (1 - reduction));
+    savingsPct = Math.round(reduction * 100);
+  }
+  const savingsBytes = (actualFileSize || 0) - recommendedSize;
+
+  // Debug logging
+  console.log(`[IMAGE DEBUG] Image URL: ${imageUrl}`);
+  if (resolvedUrl !== imageUrl) {
+    console.log(`[IMAGE DEBUG] Resolved URL: ${resolvedUrl}`);
+  }
+  console.log(`[IMAGE DEBUG] HTTP Status: ${httpStatus}`);
+  console.log(`[IMAGE DEBUG] Content-Type: ${contentType}`);
+  console.log(`[IMAGE DEBUG] Content-Length: ${contentLength}`);
+  console.log(`[IMAGE DEBUG] Downloaded Bytes: ${downloadedBytes}`);
+  console.log(`[IMAGE DEBUG] Calculated Original Size: ${actualFileSize}`);
+  console.log(`[IMAGE DEBUG] Calculated Recommended Size: ${recommendedSize}`);
+  console.log(`[IMAGE DEBUG] Calculated Savings: ${savingsBytes} (${savingsPct}%)`);
 
   return {
     imageUrl,
@@ -374,13 +436,13 @@ const fetchSingleImageMetadata = async (imageUrl) => {
 };
 
 router.post('/image-metadata', async (req, res) => {
-  const { urls } = req.body;
+  const { urls, baseUrl } = req.body;
   if (!urls || !Array.isArray(urls)) {
     return res.status(400).json({ error: 'Array of image URLs is required in request body.' });
   }
 
   try {
-    const results = await Promise.all(urls.map(url => fetchSingleImageMetadata(url)));
+    const results = await Promise.all(urls.map(url => fetchSingleImageMetadata(url, baseUrl)));
     res.status(200).json({ success: true, results });
   } catch (err) {
     res.status(500).json({ error: `Image metadata fetch failed: ${err.message}` });

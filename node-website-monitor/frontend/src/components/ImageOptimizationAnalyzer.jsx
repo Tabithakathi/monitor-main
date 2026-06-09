@@ -103,8 +103,17 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     const seen = new Set();
     const addUrl = (src) => {
       if (!src || src.startsWith('data:') || seen.has(src)) return;
-      seen.add(src);
-      urls.push(src);
+      let absoluteSrc = src;
+      if (!/^https?:\/\//i.test(src)) {
+        try {
+          absoluteSrc = new URL(src, targetUrl).href;
+        } catch (e) {
+          absoluteSrc = `${targetUrl.replace(/\/$/, '')}/${src.replace(/^\//, '')}`;
+        }
+      }
+      if (seen.has(absoluteSrc)) return;
+      seen.add(absoluteSrc);
+      urls.push(absoluteSrc);
     };
 
     // Gather from crawlData if available
@@ -154,7 +163,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     const fetchSizes = async () => {
       setLoadingSizes(true);
       try {
-        const response = await axios.post('/api/image-metadata', { urls: rawImageUrls });
+        const response = await axios.post('/api/image-metadata', { urls: rawImageUrls, baseUrl: targetUrl });
         if (isMounted && response.data?.success) {
           const map = {};
           response.data.results.forEach(res => {
@@ -182,7 +191,7 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     return () => {
       isMounted = false;
     };
-  }, [rawImageUrls]);
+  }, [rawImageUrls, targetUrl]);
 
   // 2. Build and Enrich Image List
   const images = useMemo(() => {
@@ -192,9 +201,18 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
     // Helper to add image safely
     const addImage = (src, pageUrl, altStatus, isLazy) => {
       if (!src || src.startsWith('data:') || seenSrcs.has(src)) return;
-      seenSrcs.add(src);
+      let absoluteSrc = src;
+      if (!/^https?:\/\//i.test(src)) {
+        try {
+          absoluteSrc = new URL(src, targetUrl).href;
+        } catch (e) {
+          absoluteSrc = `${targetUrl.replace(/\/$/, '')}/${src.replace(/^\//, '')}`;
+        }
+      }
+      if (seenSrcs.has(absoluteSrc)) return;
+      seenSrcs.add(absoluteSrc);
       rawImages.push({
-        src,
+        src: absoluteSrc,
         pageUrl: pageUrl || targetUrl,
         altStatus: altStatus || 'ok',
         isLazy: !!isLazy
@@ -243,8 +261,8 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
       // Look up real sizes and backend-detected format
       const sizeInfo = imageSizesMap[img.src];
-      const isBroken = sizeInfo ? !sizeInfo.isValid : false;
-      const brokenReason = sizeInfo ? sizeInfo.errorReason : null;
+      const isBroken = sizeInfo ? !sizeInfo.isValid : true;
+      const brokenReason = sizeInfo ? sizeInfo.errorReason : 'Access Denied';
 
       const originalSize = (sizeInfo && sizeInfo.isValid) ? sizeInfo.actualFileSize : 0;
       const detectedFormat = (sizeInfo && sizeInfo.isValid) ? (sizeInfo.format || ext) : ext;
@@ -259,33 +277,38 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
         const getCompressionEstimate = (formatName, size) => {
           const fmt = formatName?.toLowerCase();
           
-          // 1. PNG: 40% to 80% reduction
+          // 1. PNG: typical reduction 40%–80%
           if (fmt === 'png') {
             return 40 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
           }
           
-          // 2. JPEG / JPG: 20% to 60% reduction
+          // 2. JPEG / JPG: typical reduction 20%–70%
           if (fmt === 'jpg' || fmt === 'jpeg') {
-            return 20 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+            return 20 + Math.min(50, Math.round((size / (1024 * 1024)) * 50));
           }
           
-          // 3. GIF: 30% to 70% reduction
+          // 3. GIF: typical reduction 50%–90%
           if (fmt === 'gif') {
-            return 30 + Math.min(40, Math.round((size / (1024 * 1024)) * 40));
+            return 50 + Math.min(40, Math.round((size / (2 * 1024 * 1024)) * 40));
           }
           
-          // 4. WebP / AVIF: 0% to 15% reduction
-          if (fmt === 'webp' || fmt === 'avif') {
-            return Math.min(15, Math.round((size / (1024 * 1024)) * 15));
+          // 4. WebP: minimal savings (5% flat)
+          if (fmt === 'webp') {
+            return 5;
+          }
+
+          // 5. AVIF: already optimized (0% savings)
+          if (fmt === 'avif') {
+            return 0;
           }
           
-          // 5. SVG: 0% to 20% reduction
+          // 6. SVG: typical reduction 5%–30%
           if (fmt === 'svg') {
-            return Math.min(20, Math.round((size / (200 * 1024)) * 20));
+            return 5 + Math.min(25, Math.round((size / (100 * 1024)) * 25));
           }
           
-          // Default: 10% to 30% reduction
-          return 10 + Math.min(20, Math.round((size / (1024 * 1024)) * 20));
+          // Default: 10%
+          return 10;
         };
 
         compressionEstimateVal = getCompressionEstimate(detectedFormat, originalSize);
@@ -315,6 +338,18 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
 
         if (savingsPct < 0) savingsPct = 0;
         if (savingsPct > 100) savingsPct = 100;
+      }
+
+      // Temporary Console Logs for Debugging
+      if (sizeInfo) {
+        console.log(`[FRONTEND DEBUG] Image URL: ${img.src}`);
+        console.log(`[FRONTEND DEBUG] HTTP Status: ${sizeInfo.httpStatus || 'N/A'}`);
+        console.log(`[FRONTEND DEBUG] Content-Type: ${sizeInfo.format || 'N/A'}`);
+        console.log(`[FRONTEND DEBUG] Content-Length: ${sizeInfo.contentLength || 'N/A'}`);
+        console.log(`[FRONTEND DEBUG] Downloaded Bytes: ${sizeInfo.actualFileSize || 'N/A'}`);
+        console.log(`[FRONTEND DEBUG] Calculated Original Size: ${originalSize}`);
+        console.log(`[FRONTEND DEBUG] Calculated Recommended Size: ${isBroken ? 'N/A' : optimizedSize}`);
+        console.log(`[FRONTEND DEBUG] Calculated Savings: ${isBroken ? 'N/A' : `${potentialSaving} (${savingsPct}%)`}`);
       }
 
       // Determine severity
@@ -1049,8 +1084,13 @@ export default function ImageOptimizationAnalyzer({ stats, crawlData, url, isDar
                     {selectedImage.name}
                   </h4>
                   {selectedImage.isBroken ? (
-                    <div className="text-[10px] text-rose-405 font-bold mt-1">
-                      ⚠️ Broken Image: {selectedImage.brokenReason || 'Invalid URL'}
+                    <div className="space-y-1.5 mt-2">
+                      <div className="text-xs font-bold text-rose-400">
+                        Status: <span className="font-extrabold uppercase bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 ml-1">Failed</span>
+                      </div>
+                      <div className="text-xs font-bold text-slate-400">
+                        Reason: <span className="font-mono text-rose-350 ml-1">{selectedImage.brokenReason || 'Access Denied'}</span>
+                      </div>
                     </div>
                   ) : (
                     <a 
